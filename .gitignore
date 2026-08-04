@@ -1,0 +1,14 @@
+# Kaggle API credentials — full account access. NEVER commit.
+kaggle_credentials.py
+
+# Match replays, decision logs, submission history
+logs/
+
+# Local environment
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Notebooks pulled for reference
+reference/
