@@ -440,6 +440,12 @@ def _norm_cdf(x: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+try:
+    from elite_recorder import EliteRecorder
+except ImportError:
+    EliteRecorder = None
+
+
 def run_set(agent_path, opp, seeds, steps, workers, log_decisions, tag, save_replays=0):
     jobs = []
     logs = []
@@ -451,7 +457,7 @@ def run_set(agent_path, opp, seeds, steps, workers, log_decisions, tag, save_rep
                 os.remove(dl)
             logs.append(dl)
         replay = None
-        if i < save_replays:
+        if (isinstance(save_replays, bool) and save_replays) or (isinstance(save_replays, int) and i < save_replays):
             replay = os.path.join(LOG_DIR, f"match_{tag}_{seed:04d}.json")
         jobs.append(
             {
@@ -486,6 +492,10 @@ def main(argv=None):
     ap.add_argument("--log-decisions", action="store_true")
     ap.add_argument("--save-replays", type=int, default=0, metavar="N",
                     help="write replay JSON for the first N episodes")
+    ap.add_argument("--record-elite", action="store_true", help="record elite trajectories meeting cash threshold")
+    ap.add_argument("--elite-min-cash", type=float, default=20000.0, help="minimum final cash to qualify as elite trajectory")
+    ap.add_argument("--elite-top-k", type=int, default=20, help="max capacity of elite trajectories buffer")
+    ap.add_argument("--elite-dir", default=os.path.join(LOG_DIR, "elite_trajectories"), help="directory for elite trajectories")
     ap.add_argument("--ablate", metavar="FLAG", help="paired A/B of one FLAGS entry, ON vs OFF")
     ap.add_argument("--sweep", metavar="NAME=v1,v2,...", help="paired sweep of a numeric constant")
     ap.add_argument("--replay", metavar="PATH", help="summarize a saved replay and exit")
@@ -493,6 +503,9 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     os.makedirs(LOG_DIR, exist_ok=True)
+
+    if args.record_elite:
+        args.log_decisions = True
 
     if args.replay:
         return summarize_replay(args.replay)
@@ -554,13 +567,41 @@ def main(argv=None):
                 _dump_json(args.json, {"sweep": name, "results": [(v, a) for v, a, _ in table], "best": best[0]})
             return 0
 
+        save_reps = True if args.record_elite else args.save_replays
         results, logs = run_set(
             agent_path, opp, seeds, args.steps, args.workers, args.log_decisions,
-            "run", save_replays=args.save_replays,
+            "run", save_replays=save_reps,
         )
         agg = aggregate(results, logs)
         print_report(f"{os.path.basename(args.agent)} vs {args.opponent}", agg)
         _print_acceptance(agg, args)
+
+        if args.record_elite and EliteRecorder is not None:
+            recorder = EliteRecorder(
+                elite_dir=args.elite_dir,
+                top_k=args.elite_top_k,
+                min_cash=args.elite_min_cash,
+            )
+            added_count = 0
+            for i, res in enumerate(results):
+                dl = logs[i] if i < len(logs) else None
+                rp = os.path.join(LOG_DIR, f"match_run_{seeds[i]:04d}.json")
+                if not os.path.exists(rp):
+                    rp = None
+                if recorder.add_candidate(
+                    run_result=res,
+                    agent_path=agent_path,
+                    opponent_name=args.opponent,
+                    replay_src=rp,
+                    decision_log_src=dl,
+                ):
+                    added_count += 1
+            print(f"\n--- ELITE TRAJECTORY RECORDER ---")
+            print(f"  Added {added_count} elite trajectory candidate(s) to {args.elite_dir}")
+            print(f"  Current buffer size: {len(recorder.entries)} / {recorder.top_k}")
+            if recorder.entries:
+                print(f"  Best recorded score in buffer: ${recorder.entries[0]['me_cash']:,.2f}")
+
         if args.json:
             _dump_json(args.json, agg)
         return 0
