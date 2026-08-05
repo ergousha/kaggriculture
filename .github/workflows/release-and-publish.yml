@@ -36,7 +36,7 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "Agent version extracted: v${VERSION}"
-          
+
           if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q "refs/tags/v${VERSION}"; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Tag v${VERSION} already exists. Skipping release and publish."
