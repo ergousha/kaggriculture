@@ -14,6 +14,7 @@ probe_agent.py                # schema probe (build step 1); writes logs/probe_s
 local_arena.py                # match runner, metrics, decision logs, A/B + sweep rig
 submit.py                     # pre-flight, submit, poll, history
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
+scripts/sync_opponent.py      # pre-commit hook that versions main.py into opponents/vX_Y_Z.py
 kaggle_credentials.example.py # copy to kaggle_credentials.py (gitignored)
 logs/                         # replays, decision logs, submission history, leaderboard intelligence
 ```
@@ -308,6 +309,12 @@ A script to examine real Kaggle matches where a specific version of your agent f
 uv run python examine_agent.py v0.0.5
 uv run python examine_agent.py v0.0.5 --limit 5
 ```
+
+---
+
+### Versioning and Opponent Sync
+
+When you update the `AGENT_VERSION` in `main.py` and commit, a `pre-commit` hook automatically runs `scripts/sync_opponent.py`. This copies your `main.py` into the `opponents/` directory as `vX_Y_Z.py` and stages it. This ensures that every submitted agent version remains available as a sparring partner in `local_arena.py`.
 
 ---
 

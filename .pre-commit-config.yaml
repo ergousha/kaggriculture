@@ -23,3 +23,12 @@ repos:
       - id: mypy
         additional_dependencies: [numpy, kaggle-environments]
         args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: sync-opponent
+        name: Sync Opponent File
+        entry: ./scripts/sync_opponent.py
+        language: system
+        files: ^main\.py$
+        pass_filenames: false
