@@ -21,7 +21,7 @@ REPLAY_DIR = os.path.join(LOG_DIR, "leaderboard_replays")
 
 NO_OP = {"farmer": ["PASS"], "hands": [], "market": []}
 
-_REPLAY_CACHE = {}
+_REPLAY_CACHE: dict = {}
 
 
 def _get_replay_data():
@@ -33,11 +33,17 @@ def _get_replay_data():
         candidates = []
         if os.path.exists(REPLAY_DIR):
             candidates.extend(
-                [os.path.join(REPLAY_DIR, f) for f in os.listdir(REPLAY_DIR) if f.endswith(".json") and not f.startswith("_")]
+                [
+                    os.path.join(REPLAY_DIR, f)
+                    for f in os.listdir(REPLAY_DIR)
+                    if f.endswith(".json") and not f.startswith("_")
+                ]
             )
         elite_rep = os.path.join(LOG_DIR, "elite_trajectories", "replays")
         if os.path.exists(elite_rep):
-            candidates.extend([os.path.join(elite_rep, f) for f in os.listdir(elite_rep) if f.endswith(".json")])
+            candidates.extend(
+                [os.path.join(elite_rep, f) for f in os.listdir(elite_rep) if f.endswith(".json")]
+            )
 
         if not candidates:
             return [], player_idx
@@ -50,7 +56,7 @@ def _get_replay_data():
         return _REPLAY_CACHE[cache_key]
 
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             data = json.load(f)
         steps = data.get("steps", [])
         _REPLAY_CACHE[cache_key] = (steps, player_idx)

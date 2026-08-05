@@ -29,6 +29,7 @@ Reading order: FLAGS and the tunable block record what is measured vs assumed;
 StrategicPlanner is the macro layer; SpatialScheduler the per-turn one.
 """
 
+import json
 import math
 import os
 import time
@@ -42,17 +43,73 @@ AGENT_VERSION = "0.0.5"
 # ---------------------------------------------------------------------------
 
 CROPS = {
-    "WHEAT":      {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "interval": 0, "max_yield": 6, "ongoing": False},
-    "CARROT":     {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "interval": 0, "max_yield": 4, "ongoing": False},
-    "TOMATO":     {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
-    "STRAWBERRY": {"seed": 100, "first_yield_day": 10, "max_yield_day": 10, "interval": 2, "max_yield": 4, "ongoing": True},
-    "MELON":      {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
+    "WHEAT": {
+        "seed": 10,
+        "first_yield_day": 2,
+        "max_yield_day": 4,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
+    "CARROT": {
+        "seed": 20,
+        "first_yield_day": 2,
+        "max_yield_day": 3,
+        "interval": 0,
+        "max_yield": 4,
+        "ongoing": False,
+    },
+    "TOMATO": {
+        "seed": 50,
+        "first_yield_day": 8,
+        "max_yield_day": 8,
+        "interval": 1,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "STRAWBERRY": {
+        "seed": 100,
+        "first_yield_day": 10,
+        "max_yield_day": 10,
+        "interval": 2,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "MELON": {
+        "seed": 80,
+        "first_yield_day": 10,
+        "max_yield_day": 12,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
 }
 
 ANIMALS = {
-    "GOOSE": {"cost": 300, "structure": "COOP",    "first_yield_day": 4, "interval": 1, "max_held": 4, "product": "EGG"},
-    "COW":   {"cost": 400, "structure": "PASTURE", "first_yield_day": 8, "interval": 2, "max_held": 6, "product": "MILK"},
-    "SHEEP": {"cost": 500, "structure": "PASTURE", "first_yield_day": 6, "interval": 3, "max_held": 6, "product": "WOOL"},
+    "GOOSE": {
+        "cost": 300,
+        "structure": "COOP",
+        "first_yield_day": 4,
+        "interval": 1,
+        "max_held": 4,
+        "product": "EGG",
+    },
+    "COW": {
+        "cost": 400,
+        "structure": "PASTURE",
+        "first_yield_day": 8,
+        "interval": 2,
+        "max_held": 6,
+        "product": "MILK",
+    },
+    "SHEEP": {
+        "cost": 500,
+        "structure": "PASTURE",
+        "first_yield_day": 6,
+        "interval": 3,
+        "max_held": 6,
+        "product": "WOOL",
+    },
 }
 
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
@@ -61,15 +118,87 @@ MARKET_I0 = 10000
 PRICE_FLOOR = 1
 
 MARKET_PARAMS = {
-    "WHEAT":      {"base":  25, "I0": MARKET_I0, "T": 400, "below_func": "sqrt",   "below_target": 0.80, "above_func": "log",    "above_target": 0.20},
-    "CARROT":     {"base":  35, "I0": MARKET_I0, "T": 450, "below_func": "log",    "below_target": 0.20, "above_func": "sqrt",   "above_target": 0.70},
-    "TOMATO":     {"base":  60, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "sqrt",   "above_target": 0.60},
-    "STRAWBERRY": {"base": 120, "I0": MARKET_I0, "T": 100, "below_func": "sqrt",   "below_target": 0.70, "above_func": "linear", "above_target": 1.60},
-    "MELON":      {"base": 250, "I0": MARKET_I0, "T": 300, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.60},
-    "EGG":        {"base":  50, "I0": MARKET_I0, "T": 332, "below_func": "linear", "below_target": 0.40, "above_func": "log",    "above_target": 0.20},
-    "MILK":       {"base": 160, "I0": MARKET_I0, "T": 122, "below_func": "sqrt",   "below_target": 0.60, "above_func": "linear", "above_target": 1.60},
-    "WOOL":       {"base": 200, "I0": MARKET_I0, "T": 105, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.20},
-    "FERTILIZER": {"base": 100, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "linear", "above_target": 0.40},
+    "WHEAT": {
+        "base": 25,
+        "I0": MARKET_I0,
+        "T": 400,
+        "below_func": "sqrt",
+        "below_target": 0.80,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "CARROT": {
+        "base": 35,
+        "I0": MARKET_I0,
+        "T": 450,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sqrt",
+        "above_target": 0.70,
+    },
+    "TOMATO": {
+        "base": 60,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "sqrt",
+        "above_target": 0.60,
+    },
+    "STRAWBERRY": {
+        "base": 120,
+        "I0": MARKET_I0,
+        "T": 100,
+        "below_func": "sqrt",
+        "below_target": 0.70,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "MELON": {
+        "base": 250,
+        "I0": MARKET_I0,
+        "T": 300,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.60,
+    },
+    "EGG": {
+        "base": 50,
+        "I0": MARKET_I0,
+        "T": 332,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "MILK": {
+        "base": 160,
+        "I0": MARKET_I0,
+        "T": 122,
+        "below_func": "sqrt",
+        "below_target": 0.60,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "WOOL": {
+        "base": 200,
+        "I0": MARKET_I0,
+        "T": 105,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.20,
+    },
+    "FERTILIZER": {
+        "base": 100,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "linear",
+        "above_target": 0.40,
+    },
 }
 
 LAND_ORDER = ["NE", "SW", "SE"]
@@ -185,28 +314,40 @@ class MarketAnalyzer:
     def price_at(self, item, inventory):
         p = MARKET_PARAMS.get(item)
         if p is None:
-            return PRICE_FLOOR
-        base, i0, t = p["base"], p["I0"], p["T"]
-        if inventory < i0:
+            return float(PRICE_FLOOR)
+        base, i0, t = float(p["base"]), float(p["I0"]), float(p["T"])
+        inv = float(inventory)
+        if inv < i0:
             f = p["below_func"]
-            amp = p["below_target"] * base / _shape(f, t)
-            price = base + amp * _shape(f, i0 - inventory)
+            amp = float(p["below_target"]) * base / _shape(f, t)
+            price = base + amp * _shape(f, i0 - inv)
         else:
             f = p["above_func"]
-            amp = p["above_target"] * base / _shape(f, t)
-            price = base - amp * _shape(f, inventory - i0)
-        return max(PRICE_FLOOR, int(round(price)))
+            amp = float(p["above_target"]) * base / _shape(f, t)
+            price = base - amp * _shape(f, inv - i0)
+        return float(max(PRICE_FLOOR, round(price)))
 
     def price(self, item):
         """Current sell price (what SELL pays for the next unit)."""
         if item in self.inventory:
-            return self.price_at(item, self.inventory[item])
-        return self.prices.get(item, PRICE_FLOOR)
+            try:
+                inv = int(self.inventory[item])
+                return self.price_at(item, inv)
+            except (ValueError, TypeError):
+                pass
+        val = self.prices.get(item, PRICE_FLOOR)
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return float(PRICE_FLOOR)
 
     def buy_price(self, item):
         """BUY_PRODUCT quotes at post-buy inventory (inv - 1)."""
-        return self.price_at(item, self.inventory.get(item, MARKET_I0) - 1)
-
+        try:
+            inv = int(self.inventory.get(item, MARKET_I0)) - 1
+            return self.price_at(item, inv)
+        except (ValueError, TypeError):
+            return float(PRICE_FLOOR)
 
 
 # ---------------------------------------------------------------------------
@@ -302,9 +443,11 @@ class OpponentTracker:
 def _load_meta_intelligence():
     """Attempt to load local leaderboard intelligence JSON if available."""
     try:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "leaderboard_intelligence.json")
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "logs", "leaderboard_intelligence.json"
+        )
         if os.path.exists(path):
-            with open(path, "r") as f:
+            with open(path) as f:
                 data = json.load(f)
                 return data.get("top_opening_crops", {})
     except Exception:
@@ -317,7 +460,7 @@ class StrategicPlanner:
     hands to hire, when to buy land and livestock, and what to sell."""
 
     def __init__(self):
-        self.roles = {}          # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
+        self.roles = {}  # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
         self.last_role_day = -1
 
     # -- tile roles ---------------------------------------------------------
@@ -348,8 +491,12 @@ class StrategicPlanner:
         n_animals_existing = _count_animals(farm)
 
         # Dynamic ROI valuation, Opponent market pressure, and Leaderboard Meta Intelligence
-        melon_press = opp.market_pressure("MELON") if (opp and hasattr(opp, "market_pressure")) else 1.0
-        straw_press = opp.market_pressure("STRAWBERRY") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        melon_press = (
+            opp.market_pressure("MELON") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        )
+        straw_press = (
+            opp.market_pressure("STRAWBERRY") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        )
 
         p_melon = market.price("MELON") * melon_press
         p_straw = market.price("STRAWBERRY") * straw_press
@@ -360,7 +507,9 @@ class StrategicPlanner:
         # Dynamic tile allocation targets
         if (p_straw >= 100 or straw_meta_dominant) and (p_straw > p_melon or melon_press < 0.6):
             strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
-            melon_target = min(6, MELON_TILE_TARGET) if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+            melon_target = (
+                min(6, MELON_TILE_TARGET) if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+            )
         else:
             strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
             melon_target = MELON_TILE_TARGET if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
@@ -388,12 +537,12 @@ class StrategicPlanner:
         rest = max(0, rem_2 - melon_n)
 
         # Coops: just-in-time coops for geese if pasture is satisfied
-        affordable = int(cash // ANIMALS["GOOSE"]["cost"])
+        affordable = int(cash) // ANIMALS["GOOSE"]["cost"]
         coop_cap = n_animals_existing + ANIMAL_BACKLOG_CAP + affordable
-        coop_n = int(round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL)))
+        coop_n = round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL))
         coop_n = max(0, min(rest, coop_n, coop_cap))
 
-        wheat_n = max(3, int(math.ceil((n_sheep + n_cows + coop_n) * WHEAT_TILES_PER_ANIMAL)))
+        wheat_n = max(3, math.ceil((n_sheep + n_cows + coop_n) * WHEAT_TILES_PER_ANIMAL))
         wheat_n = min(rest, wheat_n)
 
         for _ in range(straw_n):
@@ -462,14 +611,18 @@ class StrategicPlanner:
                 # not the early constraint -- cash is. Buying NE on day 0 spent
                 # a third of the opening bank on tiles we had no birds for.
                 unstocked = sum(
-                    1 for (rx, ry), r in self.roles.items()
-                    if r == "COOP" and not (
+                    1
+                    for (rx, ry), r in self.roles.items()
+                    if r == "COOP"
+                    and not (
                         isinstance(farm["tiles"][ry][rx], dict)
                         and farm["tiles"][ry][rx].get("animal")
                     )
                 )
                 rich = discretionary >= price + LAND_RICH_BUFFER
-                if (unstocked <= LAND_EXPAND_SLACK or rich) and (discretionary - 500) >= price + LAND_CASH_BUFFER:
+                if (unstocked <= LAND_EXPAND_SLACK or rich) and (
+                    discretionary - 500
+                ) >= price + LAND_CASH_BUFFER:
                     orders.append(["BUY_LAND"])
                     cash -= price
                     discretionary -= price
@@ -507,7 +660,16 @@ class StrategicPlanner:
         #    left in the shed at the end scores nothing. Selling on sight also keeps
         #    the shed under its 100-item cap, past which harvests are discarded.
         sells = []
-        for item in ("EGG", "MELON", "WOOL", "MILK", "STRAWBERRY", "FERTILIZER", "TOMATO", "CARROT"):
+        for item in (
+            "EGG",
+            "MELON",
+            "WOOL",
+            "MILK",
+            "STRAWBERRY",
+            "FERTILIZER",
+            "TOMATO",
+            "CARROT",
+        ):
             held = int(shed.get(item, 0) or 0)
             if held > 0:
                 sells.append((market.price(item) * held, item, held))
@@ -612,7 +774,7 @@ class StrategicPlanner:
             # Last day: only enough to harvest and sell what already exists.
             n_animals = _count_animals(farm)
             n_plants = _count_plants(farm)
-            return max(1, min(MAX_HANDS, int(math.ceil((n_animals + n_plants) / 6.0))))
+            return max(1, min(MAX_HANDS, math.ceil((n_animals + n_plants) / 6.0)))
 
         # Deliberately NOT scaling to measured steady-state workload. Two attempts
         # at that both failed badly: a load formula counting current tiles gave 2-3
@@ -665,7 +827,11 @@ class SpatialScheduler:
                         tasks.append((PRIO_BUILD, x, y, ["BUILD_PASTURE"], None))
                     elif role in ("STRAWBERRY", "MELON", "WHEAT"):
                         crop = role
-                        last = 20 if crop == "STRAWBERRY" else (MELON_LAST_PLANT_DAY if crop == "MELON" else 29)
+                        last = (
+                            20
+                            if crop == "STRAWBERRY"
+                            else (MELON_LAST_PLANT_DAY if crop == "MELON" else 29)
+                        )
                         # Only plant if it can still reach harvest before the end.
                         if day <= last and seed_budget.get(crop, 0) > 0:
                             if day + CROPS[crop]["first_yield_day"] <= 29:
@@ -776,10 +942,12 @@ class SpatialScheduler:
         used_units = set()
         used_tiles = set()
 
-        self._ferry_animals(actions, used_units, used_tiles, units, farm, private, board, roles, log)
+        self._ferry_animals(
+            actions, used_units, used_tiles, units, farm, private, board, roles, log
+        )
         self._provision_feed(actions, used_units, units, farm, private, board, log)
 
-        for prio, tx, ty, op, req in tasks:
+        for _prio, tx, ty, op, req in tasks:
             if (tx, ty) in used_tiles:
                 continue
             best = None
@@ -813,7 +981,9 @@ class SpatialScheduler:
         log["assigned_units"] = len(used_units)
         return actions
 
-    def _ferry_animals(self, actions, used_units, used_tiles, units, farm, private, board, roles, log):
+    def _ferry_animals(
+        self, actions, used_units, used_tiles, units, farm, private, board, roles, log
+    ):
         """Dedicate units to the two-step chain that stocks a structure.
 
         Placing one goose is worth roughly $1.5k over a season — far more than
@@ -918,7 +1088,7 @@ class SpatialScheduler:
         if carried >= unfed:
             return
         short = unfed - carried
-        need_carriers = int(math.ceil(short / float(max(1, WHEAT_CARRY_PER_UNIT))))
+        need_carriers = math.ceil(short / float(max(1, WHEAT_CARRY_PER_UNIT)))
         need_carriers = min(need_carriers, FERRY_MAX_UNITS)
 
         free.sort(key=lambda u: _shed_distance(u[1], board))
@@ -1147,7 +1317,7 @@ def _hire_cost(n_already_today):
 # one player's plan leak into the other's.
 # ---------------------------------------------------------------------------
 
-_STATE = {}
+_STATE: dict = {}
 
 
 class _PlayerState:
@@ -1204,7 +1374,9 @@ def _decide(obs, config, st, log):
     log["opp_profile"] = st.opponent.profile
 
     # --- Layer A: strategy -------------------------------------------------
-    roles = st.planner.plan_roles(farm, day, days_left, market, float(farm.get("money", 0.0)), opp=st.opponent)
+    roles = st.planner.plan_roles(
+        farm, day, days_left, market, float(farm.get("money", 0.0)), opp=st.opponent
+    )
     orders = st.planner.market_orders(
         obs, farm, private, market, st.opponent, day, days_left, hour, log
     )
@@ -1231,9 +1403,24 @@ def _decide(obs, config, st, log):
 
 
 UNIT_OPS = {
-    "NORTH", "SOUTH", "EAST", "WEST", "PASS", "PICKUP", "PLACE", "DROP",
-    "PLANT", "WATER", "HARVEST", "FERTILIZE", "BUILD_COOP", "BUILD_PASTURE",
-    "DIG", "FEED", "COLLECT_FERTILIZER", "CARE",
+    "NORTH",
+    "SOUTH",
+    "EAST",
+    "WEST",
+    "PASS",
+    "PICKUP",
+    "PLACE",
+    "DROP",
+    "PLANT",
+    "WATER",
+    "HARVEST",
+    "FERTILIZE",
+    "BUILD_COOP",
+    "BUILD_PASTURE",
+    "DIG",
+    "FEED",
+    "COLLECT_FERTILIZER",
+    "CARE",
 }
 
 

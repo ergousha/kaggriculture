@@ -80,7 +80,9 @@ class LeaderboardCrawler:
                 t_id = getattr(item, "team_id", None) or getattr(item, "_team_id", None)
                 t_name = getattr(item, "team_name", None) or getattr(item, "_team_name", None)
                 score = getattr(item, "score", None) or getattr(item, "_score", None)
-                date = getattr(item, "submission_date", None) or getattr(item, "_submission_date", None)
+                date = getattr(item, "submission_date", None) or getattr(
+                    item, "_submission_date", None
+                )
                 results.append(
                     {
                         "team_id": t_id,
@@ -103,16 +105,21 @@ class LeaderboardCrawler:
             ep_list = []
             for ep in eps:
                 ep_id = getattr(ep, "id", None) or (ep.get("id") if isinstance(ep, dict) else None)
-                agents = getattr(ep, "agents", []) or (ep.get("agents", []) if isinstance(ep, dict) else [])
+                agents = getattr(ep, "agents", []) or (
+                    ep.get("agents", []) if isinstance(ep, dict) else []
+                )
                 if ep_id:
                     ep_list.append(
                         {
                             "id": ep_id,
                             "agents": [
                                 {
-                                    "submission_id": getattr(a, "submission_id", None) or (a.get("submissionId") if isinstance(a, dict) else None),
-                                    "team_name": getattr(a, "team_name", None) or (a.get("teamName") if isinstance(a, dict) else None),
-                                    "reward": getattr(a, "reward", 0.0) or (a.get("reward", 0.0) if isinstance(a, dict) else 0.0),
+                                    "submission_id": getattr(a, "submission_id", None)
+                                    or (a.get("submissionId") if isinstance(a, dict) else None),
+                                    "team_name": getattr(a, "team_name", None)
+                                    or (a.get("teamName") if isinstance(a, dict) else None),
+                                    "reward": getattr(a, "reward", 0.0)
+                                    or (a.get("reward", 0.0) if isinstance(a, dict) else 0.0),
                                 }
                                 for a in agents
                             ],
@@ -120,7 +127,10 @@ class LeaderboardCrawler:
                     )
             return ep_list
         except Exception as exc:
-            print(f"[LeaderboardCrawler] Error fetching episodes for submission {submission_id}: {exc}", file=sys.stderr)
+            print(
+                f"[LeaderboardCrawler] Error fetching episodes for submission {submission_id}: {exc}",
+                file=sys.stderr,
+            )
             return []
 
     def download_replay(self, episode_id: int) -> str | None:
@@ -138,14 +148,19 @@ class LeaderboardCrawler:
             expected = f"episode-{episode_id}-replay.json"
             src = os.path.join(tmp_dir, expected)
             if not os.path.exists(src):
-                candidates = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")]
+                candidates = [
+                    os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")
+                ]
                 if not candidates:
                     return None
                 src = candidates[0]
             shutil.move(src, target_path)
             return target_path
         except Exception as exc:
-            print(f"[LeaderboardCrawler] Error downloading replay {episode_id}: {exc}", file=sys.stderr)
+            print(
+                f"[LeaderboardCrawler] Error downloading replay {episode_id}: {exc}",
+                file=sys.stderr,
+            )
             return None
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -159,10 +174,12 @@ class LeaderboardCrawler:
     def parse_episode_trajectory(self, replay_path: str) -> dict[str, Any] | None:
         """Dissect a full 720-step replay file into player strategy metrics."""
         try:
-            with open(replay_path, "r") as f:
+            with open(replay_path) as f:
                 data = json.load(f)
         except Exception as exc:
-            print(f"[LeaderboardCrawler] Error reading replay {replay_path}: {exc}", file=sys.stderr)
+            print(
+                f"[LeaderboardCrawler] Error reading replay {replay_path}: {exc}", file=sys.stderr
+            )
             return None
 
         steps = data.get("steps", [])
@@ -271,7 +288,9 @@ class LeaderboardCrawler:
         import_hall_of_fame: bool = False,
     ) -> dict[str, Any]:
         """Execute a full scan of leaderboard matches and build intelligence payload."""
-        print(f"[LeaderboardCrawler] Starting scan (top {top_teams} teams, limit {limit_episodes} episodes)...")
+        print(
+            f"[LeaderboardCrawler] Starting scan (top {top_teams} teams, limit {limit_episodes} episodes)..."
+        )
         lb_teams = self.fetch_leaderboard()
         print(f"[LeaderboardCrawler] Fetched {len(lb_teams)} teams from leaderboard.")
 
@@ -279,8 +298,8 @@ class LeaderboardCrawler:
         scanned_count = 0
 
         # Discover submission IDs from our submissions and top leaderboard team entries
-        target_sub_ids = []
-        my_subs = []
+        target_sub_ids: list = []
+        my_subs: list = []
         try:
             my_subs = self.api.competition_submissions(self.competition) if self.api else []
         except Exception:
@@ -301,7 +320,9 @@ class LeaderboardCrawler:
                     for ep_info in eps_team:
                         if scanned_count >= limit_episodes:
                             break
-                        ep_id = getattr(ep_info, "id", None) or (ep_info.get("id") if isinstance(ep_info, dict) else None)
+                        ep_id = getattr(ep_info, "id", None) or (
+                            ep_info.get("id") if isinstance(ep_info, dict) else None
+                        )
                         if ep_id:
                             r_file = self.download_replay(int(ep_id))
                             if r_file:
@@ -312,6 +333,7 @@ class LeaderboardCrawler:
                                     if import_hall_of_fame:
                                         try:
                                             from elite_recorder import EliteRecorder
+
                                             rec = EliteRecorder()
                                             rec.import_kaggle_episode(int(ep_id), player_index=0)
                                             rec.import_kaggle_episode(int(ep_id), player_index=1)
@@ -343,7 +365,9 @@ class LeaderboardCrawler:
                         rec.import_kaggle_episode(ep_id, player_index=0)
                         rec.import_kaggle_episode(ep_id, player_index=1)
                     except Exception as exc:
-                        print(f"[LeaderboardCrawler] Error importing ep {ep_id} to Hall of Fame: {exc}")
+                        print(
+                            f"[LeaderboardCrawler] Error importing ep {ep_id} to Hall of Fame: {exc}"
+                        )
 
         crop_counts: dict[str, int] = {}
         high_score_players: list[dict[str, Any]] = []
@@ -390,7 +414,9 @@ class LeaderboardCrawler:
         ]
 
         total_ep = (payload.get("scanned_episodes_count", 1) * 2) or 1
-        for crop, cnt in sorted(payload.get("top_opening_crops", {}).items(), key=lambda x: x[1], reverse=True):
+        for crop, cnt in sorted(
+            payload.get("top_opening_crops", {}).items(), key=lambda x: x[1], reverse=True
+        ):
             pct = (cnt / total_ep) * 100
             lines.append(f"| `{crop}` | {cnt} | {pct:.1f}% |")
 
@@ -424,8 +450,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Leaderboard Intelligence Crawler")
     parser.add_argument("--limit", type=int, default=10, help="Max episodes to process")
     parser.add_argument("--top-teams", type=int, default=5, help="Top N teams to scan")
-    parser.add_argument("--interval", type=int, default=0, help="Continuous loop interval in seconds (0 = single run)")
-    parser.add_argument("--import-hall-of-fame", action="store_true", help="Import top replays to EliteRecorder")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=0,
+        help="Continuous loop interval in seconds (0 = single run)",
+    )
+    parser.add_argument(
+        "--import-hall-of-fame", action="store_true", help="Import top replays to EliteRecorder"
+    )
 
     args = parser.parse_args()
 

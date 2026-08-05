@@ -15,7 +15,6 @@ import argparse
 import itertools
 import json
 import os
-import shutil
 import sys
 import time
 from typing import Any
@@ -35,14 +34,19 @@ def run_candidate(config: dict[str, Any], episodes: int, opponent: str) -> dict[
     var_path = os.path.join(HERE, var_name)
 
     try:
-        with open(MAIN_PY, "r") as f:
+        with open(MAIN_PY) as f:
             code = f.read()
 
         # Apply config parameter overrides
         for k, v in config.items():
             import re
+
             pattern = rf"^({k}\s*=\s*)([^\n]+)"
-            code = re.sub(pattern, lambda m, val=v: f"{m.group(1)}{val!r}", code, flags=re.MULTILINE)
+
+            def _repl(m, val=v):
+                return f"{m.group(1)}{val!r}"
+
+            code = re.sub(pattern, _repl, code, flags=re.MULTILINE)
 
         with open(var_path, "w") as f:
             f.write(code)
@@ -71,11 +75,17 @@ def run_candidate(config: dict[str, Any], episodes: int, opponent: str) -> dict[
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gym Parameter Sweep")
-    parser.add_argument("--episodes", type=int, default=15, help="Episodes per candidate evaluation")
-    parser.add_argument("--opponent", default="leaderboard", help="Opponent: baseline | adaptive | leaderboard")
+    parser.add_argument(
+        "--episodes", type=int, default=15, help="Episodes per candidate evaluation"
+    )
+    parser.add_argument(
+        "--opponent", default="leaderboard", help="Opponent: baseline | adaptive | leaderboard"
+    )
     args = parser.parse_args()
 
-    print(f"[GymSweep] Starting parameter search ({args.episodes} episodes per candidate vs {args.opponent})...")
+    print(
+        f"[GymSweep] Starting parameter search ({args.episodes} episodes per candidate vs {args.opponent})..."
+    )
 
     # Search space grid
     max_hands_grid = [12, 13, 14]
@@ -84,7 +94,9 @@ def main() -> None:
     straw_frac_grid = [0.4065, 0.45]
 
     candidates = []
-    for mh, hf, st, sf in itertools.product(max_hands_grid, hire_frac_grid, straw_target_grid, straw_frac_grid):
+    for mh, hf, st, sf in itertools.product(
+        max_hands_grid, hire_frac_grid, straw_target_grid, straw_frac_grid
+    ):
         candidates.append(
             {
                 "MAX_HANDS": mh,
@@ -103,14 +115,16 @@ def main() -> None:
         print(f"[GymSweep] [{idx}/{len(candidates)}] Evaluating candidate: {cand}...")
         res = run_candidate(cand, args.episodes, args.opponent)
         evaluations.append(res)
-        print(f"  -> Win Rate: {res['win_rate']:.0%}, Mean Cash: ${res['mean_cash']:,.2f} (opp ${res['opp_mean_cash']:,.2f})")
+        print(
+            f"  -> Win Rate: {res['win_rate']:.0%}, Mean Cash: ${res['mean_cash']:,.2f} (opp ${res['opp_mean_cash']:,.2f})"
+        )
 
         if res["crashes"] == 0 and res["mean_cash"] > best_cash:
             best_cash = res["mean_cash"]
             best_res = res
 
     print("\n" + "=" * 60)
-    print(f"[GymSweep] Sweep Complete! Best Configuration:")
+    print("[GymSweep] Sweep Complete! Best Configuration:")
     print(json.dumps(best_res, indent=2))
 
     # Save best configuration

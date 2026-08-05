@@ -41,17 +41,73 @@ AGENT_VERSION = "0.0.3"
 # ---------------------------------------------------------------------------
 
 CROPS = {
-    "WHEAT":      {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "interval": 0, "max_yield": 6, "ongoing": False},
-    "CARROT":     {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "interval": 0, "max_yield": 4, "ongoing": False},
-    "TOMATO":     {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
-    "STRAWBERRY": {"seed": 100, "first_yield_day": 10, "max_yield_day": 10, "interval": 2, "max_yield": 4, "ongoing": True},
-    "MELON":      {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
+    "WHEAT": {
+        "seed": 10,
+        "first_yield_day": 2,
+        "max_yield_day": 4,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
+    "CARROT": {
+        "seed": 20,
+        "first_yield_day": 2,
+        "max_yield_day": 3,
+        "interval": 0,
+        "max_yield": 4,
+        "ongoing": False,
+    },
+    "TOMATO": {
+        "seed": 50,
+        "first_yield_day": 8,
+        "max_yield_day": 8,
+        "interval": 1,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "STRAWBERRY": {
+        "seed": 100,
+        "first_yield_day": 10,
+        "max_yield_day": 10,
+        "interval": 2,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "MELON": {
+        "seed": 80,
+        "first_yield_day": 10,
+        "max_yield_day": 12,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
 }
 
 ANIMALS = {
-    "GOOSE": {"cost": 300, "structure": "COOP",    "first_yield_day": 4, "interval": 1, "max_held": 4, "product": "EGG"},
-    "COW":   {"cost": 400, "structure": "PASTURE", "first_yield_day": 8, "interval": 2, "max_held": 6, "product": "MILK"},
-    "SHEEP": {"cost": 500, "structure": "PASTURE", "first_yield_day": 6, "interval": 3, "max_held": 6, "product": "WOOL"},
+    "GOOSE": {
+        "cost": 300,
+        "structure": "COOP",
+        "first_yield_day": 4,
+        "interval": 1,
+        "max_held": 4,
+        "product": "EGG",
+    },
+    "COW": {
+        "cost": 400,
+        "structure": "PASTURE",
+        "first_yield_day": 8,
+        "interval": 2,
+        "max_held": 6,
+        "product": "MILK",
+    },
+    "SHEEP": {
+        "cost": 500,
+        "structure": "PASTURE",
+        "first_yield_day": 6,
+        "interval": 3,
+        "max_held": 6,
+        "product": "WOOL",
+    },
 }
 
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
@@ -60,15 +116,87 @@ MARKET_I0 = 10000
 PRICE_FLOOR = 1
 
 MARKET_PARAMS = {
-    "WHEAT":      {"base":  25, "I0": MARKET_I0, "T": 400, "below_func": "sqrt",   "below_target": 0.80, "above_func": "log",    "above_target": 0.20},
-    "CARROT":     {"base":  35, "I0": MARKET_I0, "T": 450, "below_func": "log",    "below_target": 0.20, "above_func": "sqrt",   "above_target": 0.70},
-    "TOMATO":     {"base":  60, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "sqrt",   "above_target": 0.60},
-    "STRAWBERRY": {"base": 120, "I0": MARKET_I0, "T": 100, "below_func": "sqrt",   "below_target": 0.70, "above_func": "linear", "above_target": 1.60},
-    "MELON":      {"base": 250, "I0": MARKET_I0, "T": 300, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.60},
-    "EGG":        {"base":  50, "I0": MARKET_I0, "T": 332, "below_func": "linear", "below_target": 0.40, "above_func": "log",    "above_target": 0.20},
-    "MILK":       {"base": 160, "I0": MARKET_I0, "T": 122, "below_func": "sqrt",   "below_target": 0.60, "above_func": "linear", "above_target": 1.60},
-    "WOOL":       {"base": 200, "I0": MARKET_I0, "T": 105, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.20},
-    "FERTILIZER": {"base": 100, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "linear", "above_target": 0.40},
+    "WHEAT": {
+        "base": 25,
+        "I0": MARKET_I0,
+        "T": 400,
+        "below_func": "sqrt",
+        "below_target": 0.80,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "CARROT": {
+        "base": 35,
+        "I0": MARKET_I0,
+        "T": 450,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sqrt",
+        "above_target": 0.70,
+    },
+    "TOMATO": {
+        "base": 60,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "sqrt",
+        "above_target": 0.60,
+    },
+    "STRAWBERRY": {
+        "base": 120,
+        "I0": MARKET_I0,
+        "T": 100,
+        "below_func": "sqrt",
+        "below_target": 0.70,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "MELON": {
+        "base": 250,
+        "I0": MARKET_I0,
+        "T": 300,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.60,
+    },
+    "EGG": {
+        "base": 50,
+        "I0": MARKET_I0,
+        "T": 332,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "MILK": {
+        "base": 160,
+        "I0": MARKET_I0,
+        "T": 122,
+        "below_func": "sqrt",
+        "below_target": 0.60,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "WOOL": {
+        "base": 200,
+        "I0": MARKET_I0,
+        "T": 105,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.20,
+    },
+    "FERTILIZER": {
+        "base": 100,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "linear",
+        "above_target": 0.40,
+    },
 }
 
 LAND_ORDER = ["NE", "SW", "SE"]
@@ -207,7 +335,6 @@ class MarketAnalyzer:
         return self.price_at(item, self.inventory.get(item, MARKET_I0) - 1)
 
 
-
 # ---------------------------------------------------------------------------
 # Opponent tracking (their farm IS public — only shed/seeds/inventories are not)
 # ---------------------------------------------------------------------------
@@ -275,7 +402,6 @@ class OpponentTracker:
             self.profile = "UNKNOWN"
 
 
-
 # ---------------------------------------------------------------------------
 # Strategic planner (macro: money, land, labour, tile roles)
 # ---------------------------------------------------------------------------
@@ -286,7 +412,7 @@ class StrategicPlanner:
     hands to hire, when to buy land and livestock, and what to sell."""
 
     def __init__(self):
-        self.roles = {}          # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
+        self.roles = {}  # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
         self.last_role_day = -1
 
     # -- tile roles ---------------------------------------------------------
@@ -417,14 +543,18 @@ class StrategicPlanner:
                 # not the early constraint -- cash is. Buying NE on day 0 spent
                 # a third of the opening bank on tiles we had no birds for.
                 unstocked = sum(
-                    1 for (rx, ry), r in self.roles.items()
-                    if r == "COOP" and not (
+                    1
+                    for (rx, ry), r in self.roles.items()
+                    if r == "COOP"
+                    and not (
                         isinstance(farm["tiles"][ry][rx], dict)
                         and farm["tiles"][ry][rx].get("animal")
                     )
                 )
                 rich = discretionary >= price + LAND_RICH_BUFFER
-                if (unstocked <= LAND_EXPAND_SLACK or rich) and (discretionary - 500) >= price + LAND_CASH_BUFFER:
+                if (unstocked <= LAND_EXPAND_SLACK or rich) and (
+                    discretionary - 500
+                ) >= price + LAND_CASH_BUFFER:
                     orders.append(["BUY_LAND"])
                     cash -= price
                     discretionary -= price
@@ -462,7 +592,16 @@ class StrategicPlanner:
         #    left in the shed at the end scores nothing. Selling on sight also keeps
         #    the shed under its 100-item cap, past which harvests are discarded.
         sells = []
-        for item in ("EGG", "MELON", "WOOL", "MILK", "STRAWBERRY", "FERTILIZER", "TOMATO", "CARROT"):
+        for item in (
+            "EGG",
+            "MELON",
+            "WOOL",
+            "MILK",
+            "STRAWBERRY",
+            "FERTILIZER",
+            "TOMATO",
+            "CARROT",
+        ):
             held = int(shed.get(item, 0) or 0)
             if held > 0:
                 sells.append((market.price(item) * held, item, held))
@@ -620,7 +759,11 @@ class SpatialScheduler:
                         tasks.append((PRIO_BUILD, x, y, ["BUILD_PASTURE"], None))
                     elif role in ("STRAWBERRY", "MELON", "WHEAT"):
                         crop = role
-                        last = 20 if crop == "STRAWBERRY" else (MELON_LAST_PLANT_DAY if crop == "MELON" else 29)
+                        last = (
+                            20
+                            if crop == "STRAWBERRY"
+                            else (MELON_LAST_PLANT_DAY if crop == "MELON" else 29)
+                        )
                         # Only plant if it can still reach harvest before the end.
                         if day <= last and seed_budget.get(crop, 0) > 0:
                             if day + CROPS[crop]["first_yield_day"] <= 29:
@@ -731,10 +874,12 @@ class SpatialScheduler:
         used_units = set()
         used_tiles = set()
 
-        self._ferry_animals(actions, used_units, used_tiles, units, farm, private, board, roles, log)
+        self._ferry_animals(
+            actions, used_units, used_tiles, units, farm, private, board, roles, log
+        )
         self._provision_feed(actions, used_units, units, farm, private, board, log)
 
-        for prio, tx, ty, op, req in tasks:
+        for _prio, tx, ty, op, req in tasks:
             if (tx, ty) in used_tiles:
                 continue
             best = None
@@ -768,7 +913,9 @@ class SpatialScheduler:
         log["assigned_units"] = len(used_units)
         return actions
 
-    def _ferry_animals(self, actions, used_units, used_tiles, units, farm, private, board, roles, log):
+    def _ferry_animals(
+        self, actions, used_units, used_tiles, units, farm, private, board, roles, log
+    ):
         """Dedicate units to the two-step chain that stocks a structure.
 
         Placing one goose is worth roughly $1.5k over a season — far more than
@@ -1102,7 +1249,7 @@ def _hire_cost(n_already_today):
 # one player's plan leak into the other's.
 # ---------------------------------------------------------------------------
 
-_STATE = {}
+_STATE: dict = {}
 
 
 class _PlayerState:
@@ -1186,9 +1333,24 @@ def _decide(obs, config, st, log):
 
 
 UNIT_OPS = {
-    "NORTH", "SOUTH", "EAST", "WEST", "PASS", "PICKUP", "PLACE", "DROP",
-    "PLANT", "WATER", "HARVEST", "FERTILIZE", "BUILD_COOP", "BUILD_PASTURE",
-    "DIG", "FEED", "COLLECT_FERTILIZER", "CARE",
+    "NORTH",
+    "SOUTH",
+    "EAST",
+    "WEST",
+    "PASS",
+    "PICKUP",
+    "PLACE",
+    "DROP",
+    "PLANT",
+    "WATER",
+    "HARVEST",
+    "FERTILIZE",
+    "BUILD_COOP",
+    "BUILD_PASTURE",
+    "DIG",
+    "FEED",
+    "COLLECT_FERTILIZER",
+    "CARE",
 }
 
 

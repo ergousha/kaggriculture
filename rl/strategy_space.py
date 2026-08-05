@@ -26,27 +26,25 @@ PARAM_DEFS: list[ParamDef] = [
     ParamDef("MAX_HANDS", 4, 24, int, 12, "Maximum farmhands to hire"),
     ParamDef("HIRES_PER_TURN", 1, 8, int, 6, "Maximum hires allowed per turn"),
     ParamDef("HIRE_CASH_FRACTION", 0.05, 0.50, float, 0.25, "Max cash fraction spent on hiring"),
-
     # Land Expansion
     ParamDef("LAND_CASH_BUFFER", 0, 5000, float, 1000, "Cash buffer required before buying land"),
     ParamDef("LAND_LAST_DAY", 10, 28, int, 22, "Cutoff day for buying land"),
-
     # Livestock Targets
     ParamDef("GOOSE_MIN_DAYS_LEFT", 4, 20, int, 9, "Minimum days left to buy goose"),
     ParamDef("SHEEP_MIN_DAYS_LEFT", 4, 20, int, 10, "Minimum days left to buy sheep"),
     ParamDef("COW_MIN_DAYS_LEFT", 4, 20, int, 10, "Minimum days left to buy cow"),
     ParamDef("MAX_SHEEP", 0, 12, int, 6, "Max sheep ceiling"),
     ParamDef("MAX_COWS", 0, 12, int, 8, "Max cow ceiling"),
-
     # Crop & Feed Infrastructure
     ParamDef("WHEAT_TILES_PER_ANIMAL", 0.3, 1.8, float, 0.8, "Wheat tile target per animal"),
     ParamDef("WHEAT_FEED_DAYS_RESERVE", 1, 7, int, 3, "Days of wheat feed reserve target"),
     ParamDef("STRAWBERRY_TILE_TARGET", 5, 50, int, 35, "Target strawberry tile count"),
-    ParamDef("STRAWBERRY_LAND_FRACTION", 0.10, 0.80, float, 0.50, "Max fraction of land for strawberry"),
+    ParamDef(
+        "STRAWBERRY_LAND_FRACTION", 0.10, 0.80, float, 0.50, "Max fraction of land for strawberry"
+    ),
     ParamDef("MELON_TILE_TARGET", 4, 30, int, 12, "Target melon tile count"),
     ParamDef("MELON_LAND_FRACTION", 0.10, 0.70, float, 0.30, "Max fraction of land for melon"),
     ParamDef("MELON_LAST_PLANT_DAY", 8, 25, int, 17, "Cutoff day for planting melon"),
-
     # Priorities
     ParamDef("PRIO_FEED_URGENT", 800, 1200, int, 1000, "Priority for urgent feeding"),
     ParamDef("PRIO_WATER_URGENT", 750, 1150, int, 950, "Priority for urgent watering"),
@@ -72,7 +70,7 @@ class StrategySpace:
         """Return the normalized [-1, 1] vector for default main.py settings."""
         vec = []
         for p in self.defs:
-            if p.val_type == bool:
+            if p.val_type is bool:
                 val = 1.0 if p.default else -1.0
             else:
                 # Linear map from [min, max] to [-1, 1]
@@ -85,15 +83,15 @@ class StrategySpace:
         if len(vector) != self.dim:
             raise ValueError(f"Vector length {len(vector)} != strategy dimension {self.dim}")
 
-        res = {}
-        for p, norm_val in zip(self.defs, vector):
-            norm_clamped = max(-1.0, min(1.0, float(norm_val)))
-            if p.val_type == bool:
+        res: dict[str, Any] = {}
+        for p, norm_val in zip(self.defs, vector, strict=False):
+            norm_clamped = max(-1.0, min(1.0, norm_val))
+            if p.val_type is bool:
                 res[p.name] = norm_clamped >= 0.0
             else:
                 raw_val = p.min_val + 0.5 * (norm_clamped + 1.0) * (p.max_val - p.min_val)
-                if p.val_type == int:
-                    res[p.name] = int(round(raw_val))
+                if p.val_type is int:
+                    res[p.name] = round(raw_val)
                 else:
                     res[p.name] = round(raw_val, 4)
         return res
@@ -103,7 +101,7 @@ class StrategySpace:
         vec = []
         for p in self.defs:
             val = param_dict.get(p.name, p.default)
-            if p.val_type == bool:
+            if p.val_type is bool:
                 norm_val = 1.0 if val else -1.0
             else:
                 norm_val = 2.0 * (float(val) - p.min_val) / (p.max_val - p.min_val) - 1.0
@@ -133,12 +131,16 @@ class StrategySpace:
         """Write a new main.py variant file with the specified strategy overrides."""
         param_dict = vector if isinstance(vector, dict) else self.vector_to_dict(vector)
 
-        with open(src_path, "r") as f:
+        with open(src_path) as f:
             src = f.read()
 
         for name, value in param_dict.items():
             pattern = rf"(?m)^({re.escape(name)}\s*=\s*)([^\n#]+)"
-            new_src, n = re.subn(pattern, lambda m: m.group(1) + repr(value), src)
+
+            def _repl_param(m, v=value):
+                return m.group(1) + repr(v)
+
+            new_src, n = re.subn(pattern, _repl_param, src)
             if n > 0:
                 src = new_src
 

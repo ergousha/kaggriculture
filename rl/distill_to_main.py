@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from typing import Any
 
 from rl.kaggriculture_env import KaggricultureGymEnv
@@ -34,7 +33,7 @@ class StrategyDistiller:
         if not os.path.exists(strategy_file):
             raise FileNotFoundError(f"Strategy file not found: {strategy_file}")
 
-        with open(strategy_file, "r") as f:
+        with open(strategy_file) as f:
             data = json.load(f)
 
         strategy_vec = data.get("strategy_vector")
@@ -51,12 +50,12 @@ class StrategyDistiller:
         opponents = opponents or ["baseline", "adaptive"]
         default_vec = self.space.get_default_vector()
 
-        print(f"=== Distillation Evaluation ===")
+        print("=== Distillation Evaluation ===")
         print(f"Candidate File: {strategy_file}")
         print(f"Testing against: {', '.join(opponents)} over {episodes} episodes...")
 
         cand_env = KaggricultureGymEnv(agent_base_path=self.main_path)
-        
+
         cand_results = []
         base_results = []
 
@@ -81,9 +80,13 @@ class StrategyDistiller:
             cand_wins = sum(r["win"] for r in cand_results)
             base_wins = sum(r["win"] for r in base_results)
 
-            print(f"\n--- Benchmark Results ---")
-            print(f"Baseline Mean Cash:  ${base_mean_cash:,.2f} | Win Rate: {cand_wins/len(cand_results)*100:.1f}%")
-            print(f"Candidate Mean Cash: ${cand_mean_cash:,.2f} | Win Rate: {base_wins/len(base_results)*100:.1f}%")
+            print("\n--- Benchmark Results ---")
+            print(
+                f"Baseline Mean Cash:  ${base_mean_cash:,.2f} | Win Rate: {cand_wins / len(cand_results) * 100:.1f}%"
+            )
+            print(
+                f"Candidate Mean Cash: ${cand_mean_cash:,.2f} | Win Rate: {base_wins / len(base_results) * 100:.1f}%"
+            )
             print(f"Cash Advantage:      ${delta:+,.2f} ({pct_change:+.2f}%)\n")
 
             return {

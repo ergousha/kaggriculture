@@ -12,7 +12,7 @@ import time
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 PROBE_TURNS = 5
 
-_records = []
+_records: list = []
 
 
 def _plain(obj, depth=0):
@@ -31,12 +31,14 @@ def _plain(obj, depth=0):
 def probe_agent(obs, config):
     """Records the full obs/config, then plays a legal no-op."""
     if len(_records) < PROBE_TURNS:
+        plain_obs = _plain(obs)
+        obs_keys = sorted(plain_obs.keys()) if isinstance(plain_obs, dict) else []
         _records.append(
             {
                 "arity_seen": 2,
-                "obs_keys": sorted(_plain(obs).keys()),
+                "obs_keys": obs_keys,
                 "config": _plain(config),
-                "obs": _plain(obs),
+                "obs": plain_obs,
             }
         )
     return {"farmer": ["PASS"], "hands": [], "market": []}

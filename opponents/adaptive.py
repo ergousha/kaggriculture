@@ -14,19 +14,65 @@ Once credentials are configured, `submit.py --dry-run` prints the command to pul
 the real notebook so this can be replaced with a faithful port.
 """
 
-import math
-
 CROPS = {
-    "WHEAT":      {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "max_yield": 6, "ongoing": False},
-    "CARROT":     {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "max_yield": 4, "ongoing": False},
-    "TOMATO":     {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "max_yield": 4, "ongoing": True},
-    "STRAWBERRY": {"seed": 100, "first_yield_day": 10, "max_yield_day": 10, "max_yield": 4, "ongoing": True},
-    "MELON":      {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "max_yield": 6, "ongoing": False},
+    "WHEAT": {
+        "seed": 10,
+        "first_yield_day": 2,
+        "max_yield_day": 4,
+        "max_yield": 6,
+        "ongoing": False,
+    },
+    "CARROT": {
+        "seed": 20,
+        "first_yield_day": 2,
+        "max_yield_day": 3,
+        "max_yield": 4,
+        "ongoing": False,
+    },
+    "TOMATO": {
+        "seed": 50,
+        "first_yield_day": 8,
+        "max_yield_day": 8,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "STRAWBERRY": {
+        "seed": 100,
+        "first_yield_day": 10,
+        "max_yield_day": 10,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "MELON": {
+        "seed": 80,
+        "first_yield_day": 10,
+        "max_yield_day": 12,
+        "max_yield": 6,
+        "ongoing": False,
+    },
 }
 ANIMALS = {
-    "GOOSE": {"cost": 300, "structure": "COOP", "first_yield_day": 4, "max_held": 4, "product": "EGG"},
-    "COW":   {"cost": 400, "structure": "PASTURE", "first_yield_day": 8, "max_held": 6, "product": "MILK"},
-    "SHEEP": {"cost": 500, "structure": "PASTURE", "first_yield_day": 6, "max_held": 6, "product": "WOOL"},
+    "GOOSE": {
+        "cost": 300,
+        "structure": "COOP",
+        "first_yield_day": 4,
+        "max_held": 4,
+        "product": "EGG",
+    },
+    "COW": {
+        "cost": 400,
+        "structure": "PASTURE",
+        "first_yield_day": 8,
+        "max_held": 6,
+        "product": "MILK",
+    },
+    "SHEEP": {
+        "cost": 500,
+        "structure": "PASTURE",
+        "first_yield_day": 6,
+        "max_held": 6,
+        "product": "WOOL",
+    },
 }
 SELLABLE = ["EGG", "MELON", "WOOL", "MILK", "STRAWBERRY", "TOMATO", "CARROT", "WHEAT"]
 MOVES = {(0, -1): "NORTH", (0, 1): "SOUTH", (1, 0): "EAST", (-1, 0): "WEST"}
@@ -83,13 +129,20 @@ def _decide(obs, config):
         return {"farmer": ["PASS"], "hands": [], "market": []}
 
     day = int(obs.get("day", 0) or 0)
-    step = int(obs.get("step", 0) or 0)
     tpd = 24
     total_days = 30
     if config is not None:
         try:
-            tpd = int(config.get("turnsPerDay", 24)) if isinstance(config, dict) else int(getattr(config, "turnsPerDay", 24))
-            eps = int(config.get("episodeSteps", 720)) if isinstance(config, dict) else int(getattr(config, "episodeSteps", 720))
+            tpd = (
+                int(config.get("turnsPerDay", 24))
+                if isinstance(config, dict)
+                else int(getattr(config, "turnsPerDay", 24))
+            )
+            eps = (
+                int(config.get("episodeSteps", 720))
+                if isinstance(config, dict)
+                else int(getattr(config, "episodeSteps", 720))
+            )
             total_days = max(1, eps // max(1, tpd))
         except Exception:
             pass
@@ -100,9 +153,7 @@ def _decide(obs, config):
     cash = float(farm.get("money", 0.0))
     crop = _stage_crop(day)
 
-    n_animals = sum(
-        1 for row in tiles for t in row if isinstance(t, dict) and t.get("animal")
-    )
+    n_animals = sum(1 for row in tiles for t in row if isinstance(t, dict) and t.get("animal"))
     coops = sum(1 for row in tiles for t in row if isinstance(t, dict) and t.get("kind") == "COOP")
 
     # ---- market orders ----
@@ -123,8 +174,10 @@ def _decide(obs, config):
     if n_animals > 0 and int(shed.get("WHEAT", 0) or 0) < n_animals * 2:
         orders.append(["BUY_PRODUCT", "WHEAT", n_animals * 2])
     vacant = sum(
-        1 for row in tiles
-        for t in row if isinstance(t, dict) and t.get("kind") == "COOP" and not t.get("animal")
+        1
+        for row in tiles
+        for t in row
+        if isinstance(t, dict) and t.get("kind") == "COOP" and not t.get("animal")
     )
     if vacant > int(shed.get("GOOSE", 0) or 0) and cash >= 300 and days_left >= 8:
         orders.append(["BUY_ANIMAL", "GOOSE", min(2, vacant)])
@@ -145,7 +198,10 @@ def _decide(obs, config):
             if t is None:
                 if coops < MAX_COOPS and days_left >= 8 and n_animals + 2 >= coops:
                     tasks.append((520, x, y, ["BUILD_COOP"], None))
-                elif int(seeds.get(crop, 0) or 0) > 0 and day + CROPS[crop]["max_yield_day"] <= total_days - 1:
+                elif (
+                    int(seeds.get(crop, 0) or 0) > 0
+                    and day + CROPS[crop]["max_yield_day"] <= total_days - 1
+                ):
                     tasks.append((500, x, y, ["PLANT", crop], None))
                 continue
             if not isinstance(t, dict):
@@ -154,7 +210,8 @@ def _decide(obs, config):
             if kind == "WEED":
                 tasks.append((300, x, y, ["DIG"], None))
             elif kind == "PLANT":
-                cd = CROPS.get(t.get("crop"), None)
+                crop_name = str(t.get("crop") or "")
+                cd = CROPS.get(crop_name, None)
                 if cd is None:
                     continue
                 age = day - int(t.get("planted_day", day) or 0)
@@ -167,16 +224,31 @@ def _decide(obs, config):
                         tasks.append((950, x, y, ["WATER"], None))
                     else:
                         ws = (cd["max_yield_day"] + 1) // 2
-                        if not cd["ongoing"] and ws <= age <= cd["max_yield_day"] and units < cd["max_yield"]:
+                        if (
+                            not cd["ongoing"]
+                            and ws <= age <= cd["max_yield_day"]
+                            and units < cd["max_yield"]
+                        ):
                             tasks.append((800, x, y, ["WATER"], None))
             elif t.get("animal"):
                 if int(t.get("yield_units", 0) or 0) > 0:
                     tasks.append((700, x, y, ["HARVEST"], None))
                 if not t.get("fed_today") and days_left > 1:
-                    tasks.append((1000 if int(t.get("consecutive_unfed", 0) or 0) >= 1 else 690, x, y, ["FEED"], "WHEAT"))
+                    tasks.append(
+                        (
+                            1000 if int(t.get("consecutive_unfed", 0) or 0) >= 1 else 690,
+                            x,
+                            y,
+                            ["FEED"],
+                            "WHEAT",
+                        )
+                    )
                 if not t.get("cared_today") and days_left > 1:
                     tasks.append((650, x, y, ["CARE"], None))
-            elif kind in ("COOP", "PASTURE") and int(shed.get("GOOSE", 0) or 0) + _carry(private, "GOOSE") > 0:
+            elif (
+                kind in ("COOP", "PASTURE")
+                and int(shed.get("GOOSE", 0) or 0) + _carry(private, "GOOSE") > 0
+            ):
                 if kind == "COOP":
                     tasks.append((880, x, y, ["PLACE", "GOOSE"], "GOOSE"))
     tasks.sort(key=lambda a: -a[0])
@@ -229,7 +301,11 @@ def _decide(obs, config):
                 continue
             if int(shed.get("GOOSE", 0) or 0) > 0:
                 assigned[i] = ["PICKUP", "GOOSE", 1]
-            elif n_animals > 0 and int(inv.get("WHEAT", 0) or 0) < 4 and int(shed.get("WHEAT", 0) or 0) > 0:
+            elif (
+                n_animals > 0
+                and int(inv.get("WHEAT", 0) or 0) < 4
+                and int(shed.get("WHEAT", 0) or 0) > 0
+            ):
                 assigned[i] = ["PICKUP", "WHEAT", 4]
             else:
                 assigned[i] = ["PASS"]
@@ -260,7 +336,11 @@ def _inv(private, idx):
 
 
 def _carry(private, item):
-    return sum(int(i.get(item, 0) or 0) for i in (private.get("inventories", []) or []) if isinstance(i, dict))
+    return sum(
+        int(i.get(item, 0) or 0)
+        for i in (private.get("inventories", []) or [])
+        if isinstance(i, dict)
+    )
 
 
 # NOTE: must be the LAST callable in the file — kaggle-environments picks the

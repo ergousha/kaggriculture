@@ -29,12 +29,14 @@ Reading order: FLAGS and the tunable block record what is measured vs assumed;
 StrategicPlanner is the macro layer; SpatialScheduler the per-turn one.
 """
 
+import json
 import math
 import os
 import time
 import traceback
 
-AGENT_VERSION = "0.0.2"
+AGENT_VERSION = "0.0.5"
+
 
 # ---------------------------------------------------------------------------
 # Environment constants (mirrored from kaggriculture.py — do NOT guess these)
@@ -215,42 +217,42 @@ FLAGS = {
     "ANIMAL_CARE": True,
 }
 
-# Labour: 12 hands provides the optimal balance of labor vs. wage costs (v0.0.2 replay insight).
-MAX_HANDS = 12
-HIRES_PER_TURN = 6
-HIRE_CASH_FRACTION = 0.25
+# Labour: 13 hands matches top #1 leaderboard agents ($187k score insight), with 14.5% cash gate.
+MAX_HANDS = 13
+HIRES_PER_TURN = 7
+HIRE_CASH_FRACTION = 0.1453
 
 # Animal logistics.
 FERRY_MAX_UNITS = 6
 ANIMAL_BACKLOG_CAP = 8
 
 # Land. $1k/$2k/$4k.
-LAND_CASH_BUFFER = 1000
+LAND_CASH_BUFFER = 1295.8151
 LAND_EXPAND_SLACK = 2
 LAND_RICH_BUFFER = 3000
-LAND_LAST_DAY = 22
+LAND_LAST_DAY = 17
 
 # Livestock ROI guards & targets (v0.0.2 replay insight: scale up Pasture livestock).
-GOOSE_MIN_DAYS_LEFT = 9
-SHEEP_MIN_DAYS_LEFT = 10
-COW_MIN_DAYS_LEFT = 10
-MAX_SHEEP = 6
+GOOSE_MIN_DAYS_LEFT = 18
+SHEEP_MIN_DAYS_LEFT = 9
+COW_MIN_DAYS_LEFT = 11
+MAX_SHEEP = 7
 MAX_COWS = 8
 PREMIUM_MIN_TILES = 12
 
 # Wheat feed.
-WHEAT_TILES_PER_ANIMAL = 0.8
-WHEAT_FEED_DAYS_RESERVE = 3
+WHEAT_TILES_PER_ANIMAL = 0.6082
+WHEAT_FEED_DAYS_RESERVE = 2
 WHEAT_MAX_BUY_PRICE = 70
 FEED_GATE_MAX = 50
 WHEAT_CARRY_PER_UNIT = 6
 
-# Strawberry & Melon targets (v0.0.2 replay insight: Strawberry is primary multi-harvest cash engine).
-STRAWBERRY_TILE_TARGET = 35
-STRAWBERRY_LAND_FRACTION = 0.50
+# Strawberry & Melon targets (v0.0.6 leaderboard insight: balanced Melon windfall + Strawberry multi-harvest).
+STRAWBERRY_TILE_TARGET = 45
+STRAWBERRY_LAND_FRACTION = 0.4065
 MELON_TILE_TARGET = 12
-MELON_LAND_FRACTION = 0.30
-MELON_LAST_PLANT_DAY = 17
+MELON_LAND_FRACTION = 0.4693
+MELON_LAST_PLANT_DAY = 15
 
 # Safety guard.
 TURN_TIME_BUDGET = 1.0
@@ -258,14 +260,14 @@ TIME_GUARD_FRACTION = 0.70
 MAX_MARKET_ORDERS = 10
 
 # Task priorities.
-PRIO_FEED_URGENT = 1000
-PRIO_WATER_URGENT = 950
-PRIO_HARVEST_ANIMAL_FULL = 900
+PRIO_FEED_URGENT = 1079
+PRIO_WATER_URGENT = 959
+PRIO_HARVEST_ANIMAL_FULL = 938
 PRIO_PLACE_ANIMAL = 880
-PRIO_HARVEST_CROP = 850
+PRIO_HARVEST_CROP = 990
 PRIO_WATER_BONUS = 800
-PRIO_CARE = 700
-PRIO_FEED = 690
+PRIO_CARE = 719
+PRIO_FEED = 802
 PRIO_COLLECT_FERTILIZER = 650
 PRIO_HARVEST_ANIMAL = 600
 PRIO_DIG_WEED = 570
@@ -312,27 +314,40 @@ class MarketAnalyzer:
     def price_at(self, item, inventory):
         p = MARKET_PARAMS.get(item)
         if p is None:
-            return PRICE_FLOOR
-        base, i0, t = p["base"], p["I0"], p["T"]
-        if inventory < i0:
+            return float(PRICE_FLOOR)
+        base, i0, t = float(p["base"]), float(p["I0"]), float(p["T"])
+        inv = float(inventory)
+        if inv < i0:
             f = p["below_func"]
-            amp = p["below_target"] * base / _shape(f, t)
-            price = base + amp * _shape(f, i0 - inventory)
+            amp = float(p["below_target"]) * base / _shape(f, t)
+            price = base + amp * _shape(f, i0 - inv)
         else:
             f = p["above_func"]
-            amp = p["above_target"] * base / _shape(f, t)
-            price = base - amp * _shape(f, inventory - i0)
-        return max(PRICE_FLOOR, int(round(price)))
+            amp = float(p["above_target"]) * base / _shape(f, t)
+            price = base - amp * _shape(f, inv - i0)
+        return float(max(PRICE_FLOOR, round(price)))
 
     def price(self, item):
         """Current sell price (what SELL pays for the next unit)."""
         if item in self.inventory:
-            return self.price_at(item, self.inventory[item])
-        return self.prices.get(item, PRICE_FLOOR)
+            try:
+                inv = int(self.inventory[item])
+                return self.price_at(item, inv)
+            except (ValueError, TypeError):
+                pass
+        val = self.prices.get(item, PRICE_FLOOR)
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return float(PRICE_FLOOR)
 
     def buy_price(self, item):
         """BUY_PRODUCT quotes at post-buy inventory (inv - 1)."""
-        return self.price_at(item, self.inventory.get(item, MARKET_I0) - 1)
+        try:
+            inv = int(self.inventory.get(item, MARKET_I0)) - 1
+            return self.price_at(item, inv)
+        except (ValueError, TypeError):
+            return float(PRICE_FLOOR)
 
 
 # ---------------------------------------------------------------------------
@@ -401,10 +416,43 @@ class OpponentTracker:
         else:
             self.profile = "UNKNOWN"
 
+    def market_pressure(self, item):
+        """Estimate price saturation impact based on opponent's active crops/livestock."""
+        if item == "MELON":
+            n = self.crops.get("MELON", 0)
+            if n >= 12:
+                return 0.45  # Opponent is heavy Melon maxxer: market will crash hard
+            elif n >= 6:
+                return 0.70
+        elif item == "STRAWBERRY":
+            n = self.crops.get("STRAWBERRY", 0)
+            if n >= 20:
+                return 0.65
+        elif item == "GOOSE":
+            n = self.animals.get("GOOSE", 0)
+            if n >= 12:
+                return 0.85
+        return 1.0
+
 
 # ---------------------------------------------------------------------------
 # Strategic planner (macro: money, land, labour, tile roles)
 # ---------------------------------------------------------------------------
+
+
+def _load_meta_intelligence():
+    """Attempt to load local leaderboard intelligence JSON if available."""
+    try:
+        path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "logs", "leaderboard_intelligence.json"
+        )
+        if os.path.exists(path):
+            with open(path) as f:
+                data = json.load(f)
+                return data.get("top_opening_crops", {})
+    except Exception:
+        pass
+    return {}
 
 
 class StrategicPlanner:
@@ -417,11 +465,11 @@ class StrategicPlanner:
 
     # -- tile roles ---------------------------------------------------------
 
-    def plan_roles(self, farm, day, days_left, market, cash):
-        """Assign a role to every unlocked, non-shed-access tile.
+    def plan_roles(self, farm, day, days_left, market, cash, opp=None):
+        """Assign a role to every unlocked, non-shed-access tile using dynamic ROI auction.
 
         Ordering matters: animals are placed nearest the shed because they need
-        wheat carried out from it every day, melons next (one water/day), wheat
+        wheat carried out from it every day, melons/strawberries next, wheat
         on the remainder.
         """
         board = len(farm.get("tiles", []) or [])
@@ -441,10 +489,30 @@ class StrategicPlanner:
         usable.sort(key=lambda p: (_shed_distance(p, board), p[1], p[0]))
 
         n_animals_existing = _count_animals(farm)
-        # How many animal tiles can we actually service? Each animal costs ~3
-        # action-slots/day (FEED + CARE + amortised HARVEST) plus ~1 to walk.
-        strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
-        melon_target = MELON_TILE_TARGET if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+
+        # Dynamic ROI valuation, Opponent market pressure, and Leaderboard Meta Intelligence
+        melon_press = (
+            opp.market_pressure("MELON") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        )
+        straw_press = (
+            opp.market_pressure("STRAWBERRY") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        )
+
+        p_melon = market.price("MELON") * melon_press
+        p_straw = market.price("STRAWBERRY") * straw_press
+
+        meta_crops = _load_meta_intelligence()
+        straw_meta_dominant = meta_crops.get("STRAWBERRY", 0) > meta_crops.get("MELON", 0)
+
+        # Dynamic tile allocation targets
+        if (p_straw >= 100 or straw_meta_dominant) and (p_straw > p_melon or melon_press < 0.6):
+            strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
+            melon_target = (
+                min(6, MELON_TILE_TARGET) if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+            )
+        else:
+            strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
+            melon_target = MELON_TILE_TARGET if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
 
         premium_ok = FLAGS["PREMIUM_LIVESTOCK"] and len(usable) >= PREMIUM_MIN_TILES
         n_sheep = MAX_SHEEP if premium_ok else 0
@@ -469,12 +537,12 @@ class StrategicPlanner:
         rest = max(0, rem_2 - melon_n)
 
         # Coops: just-in-time coops for geese if pasture is satisfied
-        affordable = int(cash // ANIMALS["GOOSE"]["cost"])
+        affordable = int(cash) // ANIMALS["GOOSE"]["cost"]
         coop_cap = n_animals_existing + ANIMAL_BACKLOG_CAP + affordable
-        coop_n = int(round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL)))
+        coop_n = round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL))
         coop_n = max(0, min(rest, coop_n, coop_cap))
 
-        wheat_n = max(3, int(math.ceil((n_sheep + n_cows + coop_n) * WHEAT_TILES_PER_ANIMAL)))
+        wheat_n = max(3, math.ceil((n_sheep + n_cows + coop_n) * WHEAT_TILES_PER_ANIMAL))
         wheat_n = min(rest, wheat_n)
 
         for _ in range(straw_n):
@@ -534,8 +602,7 @@ class StrategicPlanner:
         engine_claim += n_animals * WHEAT_FEED_DAYS_RESERVE * market.buy_price("WHEAT")
         discretionary = max(0.0, cash - engine_claim)
 
-        # 1. Land, from discretionary cash only, and never while coops stand
-        #    empty for want of a bird to put in them.
+        # 1. Land, from discretionary cash only, keeping $500 reserve so Day 0 seed/hire bank is safe.
         if FLAGS["EXPAND_LAND"] and day <= LAND_LAST_DAY:
             n_extra = len(farm.get("unlocked_quadrants", ["NW"])) - 1
             if 0 <= n_extra < len(LAND_PRICES):
@@ -553,9 +620,9 @@ class StrategicPlanner:
                     )
                 )
                 rich = discretionary >= price + LAND_RICH_BUFFER
-                if (
-                    unstocked <= LAND_EXPAND_SLACK or rich
-                ) and discretionary >= price + LAND_CASH_BUFFER:
+                if (unstocked <= LAND_EXPAND_SLACK or rich) and (
+                    discretionary - 500
+                ) >= price + LAND_CASH_BUFFER:
                     orders.append(["BUY_LAND"])
                     cash -= price
                     discretionary -= price
@@ -1307,7 +1374,9 @@ def _decide(obs, config, st, log):
     log["opp_profile"] = st.opponent.profile
 
     # --- Layer A: strategy -------------------------------------------------
-    roles = st.planner.plan_roles(farm, day, days_left, market, float(farm.get("money", 0.0)))
+    roles = st.planner.plan_roles(
+        farm, day, days_left, market, float(farm.get("money", 0.0)), opp=st.opponent
+    )
     orders = st.planner.market_orders(
         obs, farm, private, market, st.opponent, day, days_left, hour, log
     )

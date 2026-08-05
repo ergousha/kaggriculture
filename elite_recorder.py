@@ -46,7 +46,7 @@ class EliteRecorder:
     def _load_manifest(self) -> list[dict[str, Any]]:
         if os.path.exists(self.manifest_path):
             try:
-                with open(self.manifest_path, "r") as f:
+                with open(self.manifest_path) as f:
                     data = json.load(f)
                     if isinstance(data, list):
                         return sorted(data, key=lambda x: x.get("me_cash", 0), reverse=True)
@@ -172,7 +172,7 @@ class EliteRecorder:
         total_idle = 0
         max_money = 0.0
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 for line in f:
                     rec = json.loads(line)
                     total_steps += 1
@@ -208,7 +208,7 @@ class EliteRecorder:
                     "seed": entry["seed"],
                     "opponent": entry["opponent"],
                 }
-                with open(dec_path, "r") as f:
+                with open(dec_path) as f:
                     for line in f:
                         try:
                             record = json.loads(line)
@@ -222,6 +222,7 @@ class EliteRecorder:
     def import_kaggle_episode(self, url_or_id: str | int, player_index: int = 0) -> bool:
         """Download a live Kaggle competition episode replay by URL or ID and add to elite buffer."""
         import re
+
         s = str(url_or_id)
         m = re.search(r"episodeId=(\d+)", s)
         if m:
@@ -235,6 +236,7 @@ class EliteRecorder:
         try:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             import kaggle_credentials as creds
+
             token = getattr(creds, "KAGGLE_API_TOKEN", "")
             if token:
                 os.environ["KAGGLE_API_TOKEN"] = token
@@ -243,6 +245,7 @@ class EliteRecorder:
 
         try:
             from kaggle.api.kaggle_api_extended import KaggleApi
+
             api = KaggleApi()
             api.authenticate()
         except Exception as exc:
@@ -257,45 +260,69 @@ class EliteRecorder:
             expected_filename = f"episode-{ep_id}-replay.json"
             rep_path = os.path.join(tmp_dir, expected_filename)
             if not os.path.exists(rep_path):
-                files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")]
+                files = [
+                    os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")
+                ]
                 if not files:
-                    print(f"[EliteRecorder] Replay file for episode {ep_id} not found after download.", file=sys.stderr)
+                    print(
+                        f"[EliteRecorder] Replay file for episode {ep_id} not found after download.",
+                        file=sys.stderr,
+                    )
                     return False
                 rep_path = files[0]
 
-            with open(rep_path, "r") as f:
+            with open(rep_path) as f:
                 data = json.load(f)
 
             steps = data.get("steps", [])
             if not steps:
-                print(f"[EliteRecorder] Replay file has no steps.", file=sys.stderr)
+                print("[EliteRecorder] Replay file has no steps.", file=sys.stderr)
                 return False
 
             final_step = steps[-1]
             rewards = [s.get("reward", 0.0) or 0.0 for s in final_step]
             me_cash = float(rewards[player_index]) if player_index < len(rewards) else 0.0
-            opp_cash = float(rewards[1 - player_index]) if (1 - player_index) < len(rewards) else 0.0
+            opp_cash = (
+                float(rewards[1 - player_index]) if (1 - player_index) < len(rewards) else 0.0
+            )
 
             info = data.get("info", {})
             agents = info.get("Agents", [{}, {}])
-            opp_name = agents[1 - player_index].get("Name", "unknown") if (1 - player_index) < len(agents) else "unknown"
+            opp_name = (
+                agents[1 - player_index].get("Name", "unknown")
+                if (1 - player_index) < len(agents)
+                else "unknown"
+            )
 
             dec_path = os.path.join(tmp_dir, f"decisions_ep_{ep_id}.jsonl")
             with open(dec_path, "w") as out:
                 for s_idx, step_states in enumerate(steps):
-                    p_state = step_states[player_index] if player_index < len(step_states) else {}
-                    act = p_state.get("action")
-                    obs = p_state.get("observation") or {}
-                    farms = obs.get("farms") or []
-                    farm = farms[player_index] if player_index < len(farms) else {}
+                    p_state = (
+                        step_states[player_index]
+                        if (
+                            isinstance(step_states, (list, tuple))
+                            and player_index < len(step_states)
+                        )
+                        else {}
+                    )
+                    act = p_state.get("action") if isinstance(p_state, dict) else None
+                    obs = (p_state.get("observation") if isinstance(p_state, dict) else {}) or {}
+                    farms = (obs.get("farms") if isinstance(obs, dict) else []) or []
+                    farm = (
+                        farms[player_index]
+                        if (isinstance(farms, (list, tuple)) and player_index < len(farms))
+                        else {}
+                    )
+                    hands_raw = farm.get("hands") if isinstance(farm, dict) else None
+                    hands_cnt = len(hands_raw) if isinstance(hands_raw, (list, tuple)) else 0
                     rec = {
                         "player": player_index,
                         "step": s_idx,
                         "action": act,
                         "day": s_idx // 24,
                         "hour": s_idx % 24,
-                        "money": farm.get("money", 0.0),
-                        "n_units": len(farm.get("hands") or []) + 1,
+                        "money": float(farm.get("money", 0.0)) if isinstance(farm, dict) else 0.0,
+                        "n_units": hands_cnt + 1,
                         "source": f"kaggle_ep_{ep_id}",
                     }
                     out.write(json.dumps(rec) + "\n")
@@ -335,9 +362,12 @@ class EliteRecorder:
 # CLI Command Interface
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Elite Trajectory Recorder CLI")
-    parser.add_argument("--dir", default="logs/elite_trajectories", help="Path to elite trajectories directory")
+    parser.add_argument(
+        "--dir", default="logs/elite_trajectories", help="Path to elite trajectories directory"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # list
@@ -347,17 +377,27 @@ def main() -> None:
     subparsers.add_parser("summary", help="Show summary statistics across recorded elite runs")
 
     # export
-    export_parser = subparsers.add_parser("export", help="Export state-action dataset from elite runs")
-    export_parser.add_argument("--output", default="logs/elite_dataset.jsonl", help="Output JSONL dataset file path")
+    export_parser = subparsers.add_parser(
+        "export", help="Export state-action dataset from elite runs"
+    )
+    export_parser.add_argument(
+        "--output", default="logs/elite_dataset.jsonl", help="Output JSONL dataset file path"
+    )
 
     # import-kaggle
-    import_parser = subparsers.add_parser("import-kaggle", help="Import live Kaggle episode replay by URL or Episode ID")
+    import_parser = subparsers.add_parser(
+        "import-kaggle", help="Import live Kaggle episode replay by URL or Episode ID"
+    )
     import_parser.add_argument("target", help="Kaggle URL or episode ID (e.g. 89987566)")
-    import_parser.add_argument("--player", type=int, default=0, help="Player index to treat as main agent (0 or 1)")
+    import_parser.add_argument(
+        "--player", type=int, default=0, help="Player index to treat as main agent (0 or 1)"
+    )
 
     # prune
     prune_parser = subparsers.add_parser("prune", help="Prune stored trajectories down to top K")
-    prune_parser.add_argument("--keep", type=int, default=10, help="Number of top trajectories to keep")
+    prune_parser.add_argument(
+        "--keep", type=int, default=10, help="Number of top trajectories to keep"
+    )
 
     args = parser.parse_args()
 
@@ -382,22 +422,26 @@ def main() -> None:
             print(f"No elite trajectories found in {args.dir}")
             return
         cashes = [e.get("me_cash", 0.0) for e in recorder.entries]
-        print(f"\n--- ELITE BUFFER SUMMARY ---")
+        print("\n--- ELITE BUFFER SUMMARY ---")
         print(f"Total Elite Runs:     {len(recorder.entries)}")
         print(f"Max Cash Achieved:    ${max(cashes):,.2f}")
         print(f"Min Elite Cash:       ${min(cashes):,.2f}")
-        print(f"Mean Elite Cash:      ${sum(cashes)/len(cashes):,.2f}")
+        print(f"Mean Elite Cash:      ${sum(cashes) / len(cashes):,.2f}")
 
     elif args.command == "export":
         count = recorder.export_dataset(args.output)
-        print(f"Exported {count} decision records from {len(recorder.entries)} elite trajectories to {args.output}")
+        print(
+            f"Exported {count} decision records from {len(recorder.entries)} elite trajectories to {args.output}"
+        )
 
     elif args.command == "import-kaggle":
         success = recorder.import_kaggle_episode(args.target, player_index=args.player)
         if success:
             print(f"Successfully imported Kaggle episode '{args.target}' into elite buffer!")
         else:
-            print(f"Failed to import Kaggle episode '{args.target}'. Check cash threshold or log output.")
+            print(
+                f"Failed to import Kaggle episode '{args.target}'. Check cash threshold or log output."
+            )
 
     elif args.command == "prune":
         initial_len = len(recorder.entries)
@@ -415,4 +459,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

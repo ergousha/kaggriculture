@@ -1,0 +1,47 @@
+name: Quality Assurance CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    name: Quality Assurance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup uv and Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --dev
+
+      - name: Run Ruff Linter
+        run: |
+          uv run ruff check .
+
+      - name: Run Ruff Formatter Check
+        run: |
+          uv run ruff format --check .
+
+      - name: Run Mypy Type Check
+        run: |
+          uv run mypy submit.py main.py local_arena.py
+
+      - name: Run Agent Pre-flight & Smoke Test
+        run: |
+          uv run python submit.py --dry-run

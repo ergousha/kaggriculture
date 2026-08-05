@@ -39,6 +39,7 @@ import statistics
 import sys
 import tempfile
 import time
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(HERE, "logs")
@@ -55,18 +56,28 @@ DEFAULT_STEPS = 720
 # ---------------------------------------------------------------------------
 
 
-def make_variant(src_path: str, dest_path: str, flags: dict | None = None, consts: dict | None = None) -> str:
+def make_variant(
+    src_path: str, dest_path: str, flags: dict | None = None, consts: dict | None = None
+) -> str:
     with open(src_path) as f:
         src = f.read()
     for name, value in (flags or {}).items():
         pattern = rf'("{re.escape(name)}"\s*:\s*)(True|False)'
-        new, n = re.subn(pattern, lambda m: m.group(1) + repr(bool(value)), src)
+
+        def _repl_flag(m, v=value):
+            return m.group(1) + repr(bool(v))
+
+        new, n = re.subn(pattern, _repl_flag, src)
         if n == 0:
             raise SystemExit(f"--ablate: flag {name!r} not found in {src_path}")
         src = new
     for name, value in (consts or {}).items():
-        pattern = rf'(?m)^({re.escape(name)}\s*=\s*)([^\n#]+)'
-        new, n = re.subn(pattern, lambda m: m.group(1) + repr(value), src)
+        pattern = rf"(?m)^({re.escape(name)}\s*=\s*)([^\n#]+)"
+
+        def _repl_const(m, v=value):
+            return m.group(1) + repr(v)
+
+        new, n = re.subn(pattern, _repl_const, src)
         if n == 0:
             raise SystemExit(f"--sweep: constant {name!r} not found in {src_path}")
         src = new
@@ -122,9 +133,9 @@ def _install_instrumentation(me_index: int = 0):
     from kaggle_environments.envs.kaggriculture import kaggriculture as K
 
     if getattr(K, "_arena_instrumented", False):
-        K._arena_me_index = me_index
+        K._arena_me_index = me_index  # pyrefly: ignore [missing-attribute]
         return K
-    K._arena_me_index = me_index
+    K._arena_me_index = me_index  # pyrefly: ignore [missing-attribute]
     orig_drop = K._drop_inventories_to_shed
     orig_apply = K._apply_unit_action
 
@@ -140,8 +151,7 @@ def _install_instrumentation(me_index: int = 0):
         if player_of(private) != K._arena_me_index:
             return orig_drop(private, capacity)
         before_inv = sum(
-            sum(v for v in inv.values() if isinstance(v, int))
-            for inv in private["inventories"]
+            sum(v for v in inv.values() if isinstance(v, int)) for inv in private["inventories"]
         )
         before_shed = sum(private["shed"].values())
         orig_drop(private, capacity)
@@ -153,19 +163,34 @@ def _install_instrumentation(me_index: int = 0):
 
     # Ops whose effect we can cheaply verify by snapshotting the tile + inventory.
     CHECKED = {
-        "PLANT", "WATER", "HARVEST", "FERTILIZE", "BUILD_COOP", "BUILD_PASTURE",
-        "DIG", "PLACE", "FEED", "COLLECT_FERTILIZER", "CARE", "PICKUP", "DROP",
+        "PLANT",
+        "WATER",
+        "HARVEST",
+        "FERTILIZE",
+        "BUILD_COOP",
+        "BUILD_PASTURE",
+        "DIG",
+        "PLACE",
+        "FEED",
+        "COLLECT_FERTILIZER",
+        "CARE",
+        "PICKUP",
+        "DROP",
     }
 
     def apply(farm, private, idx, action, board_size, day, turns_per_day, shed_capacity=100):
         if player_of(farm) != K._arena_me_index:
-            return orig_apply(farm, private, idx, action, board_size, day, turns_per_day, shed_capacity)
+            return orig_apply(
+                farm, private, idx, action, board_size, day, turns_per_day, shed_capacity
+            )
         op = action[0] if isinstance(action, list) and action else None
         if op not in CHECKED:
             COUNTERS["actions_total"] = COUNTERS.get("actions_total", 0) + 1
             if op == "PASS":
                 COUNTERS["actions_pass"] = COUNTERS.get("actions_pass", 0) + 1
-            return orig_apply(farm, private, idx, action, board_size, day, turns_per_day, shed_capacity)
+            return orig_apply(
+                farm, private, idx, action, board_size, day, turns_per_day, shed_capacity
+            )
         pos = K._farmer_position(farm, idx)
         snap_tile = repr(farm["tiles"][pos[1]][pos[0]]) if pos else None
         snap_inv = repr(sorted(K._farmer_inventory(private, idx).items())) if pos else None
@@ -187,7 +212,7 @@ def _install_instrumentation(me_index: int = 0):
     K._apply_unit_action = apply
     # The interpreter captured references at def time only for these two names,
     # both of which it looks up on the module at call time, so patching sticks.
-    K._arena_instrumented = True
+    K._arena_instrumented = True  # pyrefly: ignore [missing-attribute]
     return K
 
 
@@ -270,7 +295,7 @@ def run_episode(job: dict) -> dict:
     def pct(p):
         if not durations:
             return 0.0
-        k = min(len(durations) - 1, int(round((len(durations) - 1) * p)))
+        k = min(len(durations) - 1, round((len(durations) - 1) * p))
         return durations[k]
 
     return {
@@ -306,6 +331,17 @@ def aggregate(results: list[dict], decision_logs: list[str] | None = None) -> di
     cash = [r["me_cash"] for r in results]
     opp = [r["opp_cash"] for r in results]
     n = len(results)
+    win_cnt = sum(r["win"] for r in results)
+    tie_cnt = sum(r["tie"] for r in results)
+    crash_cnt = sum(r["crashes"] for r in results)
+    timeout_cnt = sum(r["timeouts"] for r in results)
+    invalid_cnt = sum(r["invalid"] for r in results)
+    shed_lost = sum(r["shed_overflow_lost"] for r in results)
+    act_total = sum(r["actions_total"] for r in results)
+    act_noop = sum(r["actions_noop"] for r in results)
+    act_pass = sum(r["actions_pass"] for r in results)
+    wall_sec = float(sum(r["wall_seconds"] for r in results))
+
     agg = {
         "episodes": n,
         "mean_cash": round(statistics.fmean(cash), 1) if cash else 0.0,
@@ -314,25 +350,25 @@ def aggregate(results: list[dict], decision_logs: list[str] | None = None) -> di
         "max_cash": round(max(cash), 1) if cash else 0.0,
         "stdev_cash": round(statistics.stdev(cash), 1) if n > 1 else 0.0,
         "opp_mean_cash": round(statistics.fmean(opp), 1) if opp else 0.0,
-        "wins": sum(r["win"] for r in results),
-        "ties": sum(r["tie"] for r in results),
-        "win_rate": round(sum(r["win"] for r in results) / n, 4) if n else 0.0,
-        "crashes": sum(r["crashes"] for r in results),
-        "timeouts": sum(r["timeouts"] for r in results),
-        "invalid": sum(r["invalid"] for r in results),
+        "wins": win_cnt,
+        "ties": tie_cnt,
+        "win_rate": round(win_cnt / float(n), 4) if n else 0.0,
+        "crashes": crash_cnt,
+        "timeouts": timeout_cnt,
+        "invalid": invalid_cnt,
         "harness_errors": [r["harness_error"] for r in results if r["harness_error"]],
         "turn_p50": round(statistics.fmean([r["turn_p50"] for r in results]), 5) if n else 0.0,
         "turn_p95": round(max(r["turn_p95"] for r in results), 5) if n else 0.0,
         "turn_max": round(max(r["turn_max"] for r in results), 5) if n else 0.0,
-        "shed_overflow_lost": sum(r["shed_overflow_lost"] for r in results),
-        "actions_total": sum(r["actions_total"] for r in results),
-        "actions_noop": sum(r["actions_noop"] for r in results),
-        "actions_pass": sum(r["actions_pass"] for r in results),
-        "wall_seconds": round(sum(r["wall_seconds"] for r in results), 1),
+        "shed_overflow_lost": shed_lost,
+        "actions_total": act_total,
+        "actions_noop": act_noop,
+        "actions_pass": act_pass,
+        "wall_seconds": round(wall_sec, 1),
     }
-    if agg["actions_total"]:
-        agg["noop_rate"] = round(agg["actions_noop"] / agg["actions_total"], 4)
-        agg["pass_rate"] = round(agg["actions_pass"] / agg["actions_total"], 4)
+    if act_total > 0:
+        agg["noop_rate"] = round(act_noop / float(act_total), 4)
+        agg["pass_rate"] = round(act_pass / float(act_total), 4)
     noop_all: dict[str, int] = {}
     for r in results:
         for k, v in (r.get("noop_breakdown") or {}).items():
@@ -368,7 +404,7 @@ def summarize_decision_logs(paths: list[str]) -> dict:
                 for key in ("buy_land", "hire", "buy_wheat", "buy_animal", "predatory"):
                     if rec.get(key):
                         fired[key] = fired.get(key, 0) + 1
-    out = {
+    out: dict[str, Any] = {
         "log_turns": turns,
         "unit_turns": units,
         "idle_unit_turns": idle,
@@ -385,19 +421,31 @@ def summarize_decision_logs(paths: list[str]) -> dict:
 def print_report(title: str, agg: dict) -> None:
     print(f"\n=== {title} ===")
     print(f"  episodes         {agg['episodes']}   wall {agg['wall_seconds']}s")
-    print(f"  final cash       mean {agg['mean_cash']:>12,.0f}   median {agg['median_cash']:>12,.0f}")
-    print(f"                   min  {agg['min_cash']:>12,.0f}   max    {agg['max_cash']:>12,.0f}   sd {agg['stdev_cash']:,.0f}")
+    print(
+        f"  final cash       mean {agg['mean_cash']:>12,.0f}   median {agg['median_cash']:>12,.0f}"
+    )
+    print(
+        f"                   min  {agg['min_cash']:>12,.0f}   max    {agg['max_cash']:>12,.0f}   sd {agg['stdev_cash']:,.0f}"
+    )
     print(f"  opponent cash    mean {agg['opp_mean_cash']:>12,.0f}")
-    print(f"  win rate         {agg['win_rate']:.1%}  ({agg['wins']}W {agg['ties']}T {agg['episodes'] - agg['wins'] - agg['ties']}L)")
+    print(
+        f"  win rate         {agg['win_rate']:.1%}  ({agg['wins']}W {agg['ties']}T {agg['episodes'] - agg['wins'] - agg['ties']}L)"
+    )
     print(f"  crashes {agg['crashes']}   timeouts {agg['timeouts']}   invalid {agg['invalid']}")
-    print(f"  turn compute     p50 {agg['turn_p50'] * 1000:.2f}ms  p95 {agg['turn_p95'] * 1000:.2f}ms  max {agg['turn_max'] * 1000:.2f}ms")
+    print(
+        f"  turn compute     p50 {agg['turn_p50'] * 1000:.2f}ms  p95 {agg['turn_p95'] * 1000:.2f}ms  max {agg['turn_max'] * 1000:.2f}ms"
+    )
     if "noop_rate" in agg:
-        print(f"  action no-ops    {agg['actions_noop']:,}/{agg['actions_total']:,} ({agg['noop_rate']:.2%})   PASS {agg['pass_rate']:.2%}")
+        print(
+            f"  action no-ops    {agg['actions_noop']:,}/{agg['actions_total']:,} ({agg['noop_rate']:.2%})   PASS {agg['pass_rate']:.2%}"
+        )
     if agg.get("noop_breakdown"):
         print(f"  no-op ops        {agg['noop_breakdown']}")
     print(f"  shed overflow    {agg['shed_overflow_lost']:,} items lost")
     if "idle_rate" in agg:
-        print(f"  worker idle rate {agg['idle_rate']:.2%}  ({agg['idle_unit_turns']:,}/{agg['unit_turns']:,} unit-turns)")
+        print(
+            f"  worker idle rate {agg['idle_rate']:.2%}  ({agg['idle_unit_turns']:,}/{agg['unit_turns']:,} unit-turns)"
+        )
     if agg.get("market_orders_dropped"):
         print(f"  market orders dropped (>10/turn): {agg['market_orders_dropped']}")
     if agg.get("heuristics_fired"):
@@ -416,13 +464,19 @@ def paired_significance(a: list[float], b: list[float]) -> dict:
     Paired (same seeds, same opponent) so the seed-to-seed variance that
     dominates this environment cancels out.
     """
-    diffs = [x - y for x, y in zip(a, b)]
+    diffs = [x - y for x, y in zip(a, b, strict=False)]
     n = len(diffs)
     if n < 2:
-        return {"n": n, "mean_diff": diffs[0] if diffs else 0.0, "t": 0.0, "p_approx": 1.0, "a_better": 0}
+        return {
+            "n": n,
+            "mean_diff": diffs[0] if diffs else 0.0,
+            "t": 0.0,
+            "p_approx": 1.0,
+            "a_better": 0,
+        }
     mean = statistics.fmean(diffs)
     sd = statistics.stdev(diffs)
-    se = sd / (n ** 0.5) if sd > 0 else 0.0
+    se = sd / (n**0.5) if sd > 0 else 0.0
     t = mean / se if se > 0 else (float("inf") if mean else 0.0)
     # Two-sided normal approximation; n>=30 paired seeds makes this adequate.
     p = 2.0 * (1.0 - _norm_cdf(abs(t))) if se > 0 else (0.0 if mean else 1.0)
@@ -439,7 +493,7 @@ def paired_significance(a: list[float], b: list[float]) -> dict:
 def _norm_cdf(x: float) -> float:
     import math
 
-    return 0.5 * (1.0 + math.erf(x / (2 ** 0.5)))
+    return 0.5 * (1.0 + math.erf(x / (2**0.5)))
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +504,7 @@ def _norm_cdf(x: float) -> float:
 try:
     from elite_recorder import EliteRecorder
 except ImportError:
-    EliteRecorder = None
+    EliteRecorder = None  # type: ignore[assignment, misc]
 
 
 def run_set(agent_path, opp, seeds, steps, workers, log_decisions, tag, save_replays=0):
@@ -464,7 +518,9 @@ def run_set(agent_path, opp, seeds, steps, workers, log_decisions, tag, save_rep
                 os.remove(dl)
             logs.append(dl)
         replay = None
-        if (isinstance(save_replays, bool) and save_replays) or (isinstance(save_replays, int) and i < save_replays):
+        if (isinstance(save_replays, bool) and save_replays) or (
+            isinstance(save_replays, int) and i < save_replays
+        ):
             replay = os.path.join(LOG_DIR, f"match_{tag}_{seed:04d}.json")
         jobs.append(
             {
@@ -497,12 +553,32 @@ def main(argv=None):
     ap.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 1))
     ap.add_argument("--log-decisions", action="store_true")
-    ap.add_argument("--save-replays", type=int, default=0, metavar="N",
-                    help="write replay JSON for the first N episodes")
-    ap.add_argument("--record-elite", action="store_true", help="record elite trajectories meeting cash threshold")
-    ap.add_argument("--elite-min-cash", type=float, default=20000.0, help="minimum final cash to qualify as elite trajectory")
-    ap.add_argument("--elite-top-k", type=int, default=20, help="max capacity of elite trajectories buffer")
-    ap.add_argument("--elite-dir", default=os.path.join(LOG_DIR, "elite_trajectories"), help="directory for elite trajectories")
+    ap.add_argument(
+        "--save-replays",
+        type=int,
+        default=0,
+        metavar="N",
+        help="write replay JSON for the first N episodes",
+    )
+    ap.add_argument(
+        "--record-elite",
+        action="store_true",
+        help="record elite trajectories meeting cash threshold",
+    )
+    ap.add_argument(
+        "--elite-min-cash",
+        type=float,
+        default=20000.0,
+        help="minimum final cash to qualify as elite trajectory",
+    )
+    ap.add_argument(
+        "--elite-top-k", type=int, default=20, help="max capacity of elite trajectories buffer"
+    )
+    ap.add_argument(
+        "--elite-dir",
+        default=os.path.join(LOG_DIR, "elite_trajectories"),
+        help="directory for elite trajectories",
+    )
     ap.add_argument("--ablate", metavar="FLAG", help="paired A/B of one FLAGS entry, ON vs OFF")
     ap.add_argument("--sweep", metavar="NAME=v1,v2,...", help="paired sweep of a numeric constant")
     ap.add_argument("--replay", metavar="PATH", help="summarize a saved replay and exit")
@@ -527,10 +603,18 @@ def main(argv=None):
         seeds = [args.seed + i for i in range(args.episodes)]
 
         if args.ablate:
-            on = make_variant(agent_path, os.path.join(workdir, "flag_on.py"), flags={args.ablate: True})
-            off = make_variant(agent_path, os.path.join(workdir, "flag_off.py"), flags={args.ablate: False})
-            r_on, l_on = run_set(on, opp, seeds, args.steps, args.workers, args.log_decisions, f"{args.ablate}_on")
-            r_off, l_off = run_set(off, opp, seeds, args.steps, args.workers, args.log_decisions, f"{args.ablate}_off")
+            on = make_variant(
+                agent_path, os.path.join(workdir, "flag_on.py"), flags={args.ablate: True}
+            )
+            off = make_variant(
+                agent_path, os.path.join(workdir, "flag_off.py"), flags={args.ablate: False}
+            )
+            r_on, l_on = run_set(
+                on, opp, seeds, args.steps, args.workers, args.log_decisions, f"{args.ablate}_on"
+            )
+            r_off, l_off = run_set(
+                off, opp, seeds, args.steps, args.workers, args.log_decisions, f"{args.ablate}_off"
+            )
             a_on, a_off = aggregate(r_on, l_on), aggregate(r_off, l_off)
             print_report(f"{args.ablate} = ON  vs {args.opponent}", a_on)
             print_report(f"{args.ablate} = OFF vs {args.opponent}", a_off)
@@ -539,15 +623,34 @@ def main(argv=None):
             print(f"  mean delta   {sig['mean_diff']:+,.0f}  (sd {sig['sd_diff']:,.0f})")
             print(f"  ON better on {sig['a_better']}/{sig['n']} seeds")
             print(f"  t = {sig['t']}   p ~ {sig['p_approx']}")
-            rel = (a_on["mean_cash"] / a_off["mean_cash"] - 1.0) if a_off["mean_cash"] else float("nan")
+            rel = (
+                (a_on["mean_cash"] / a_off["mean_cash"] - 1.0)
+                if a_off["mean_cash"]
+                else float("nan")
+            )
             print(f"  relative     {rel:+.1%}")
-            verdict = "KEEP ON" if sig["p_approx"] < 0.05 and sig["mean_diff"] > 0 else (
-                "KEEP OFF" if sig["p_approx"] < 0.05 and sig["mean_diff"] < 0 else "INCONCLUSIVE"
+            verdict = (
+                "KEEP ON"
+                if sig["p_approx"] < 0.05 and sig["mean_diff"] > 0
+                else (
+                    "KEEP OFF"
+                    if sig["p_approx"] < 0.05 and sig["mean_diff"] < 0
+                    else "INCONCLUSIVE"
+                )
             )
             print(f"  verdict      {verdict}")
             if args.json:
-                _dump_json(args.json, {"ablate": args.ablate, "on": a_on, "off": a_off, "significance": sig,
-                                       "relative": rel, "verdict": verdict})
+                _dump_json(
+                    args.json,
+                    {
+                        "ablate": args.ablate,
+                        "on": a_on,
+                        "off": a_off,
+                        "significance": sig,
+                        "relative": rel,
+                        "verdict": verdict,
+                    },
+                )
             return 0
 
         if args.sweep:
@@ -557,27 +660,42 @@ def main(argv=None):
                 raise SystemExit("--sweep needs at least two values")
             table = []
             for v in values:
-                path = make_variant(agent_path, os.path.join(workdir, f"sweep_{name}_{v}.py"), consts={name: v})
-                res, logs = run_set(path, opp, seeds, args.steps, args.workers, args.log_decisions, f"{name}_{v}")
+                path = make_variant(
+                    agent_path, os.path.join(workdir, f"sweep_{name}_{v}.py"), consts={name: v}
+                )
+                res, logs = run_set(
+                    path, opp, seeds, args.steps, args.workers, args.log_decisions, f"{name}_{v}"
+                )
                 agg = aggregate(res, logs)
                 print_report(f"{name} = {v} vs {args.opponent}", agg)
                 table.append((v, agg, [r["me_cash"] for r in res]))
             best = max(table, key=lambda row: row[1]["mean_cash"])
             print(f"\n--- sweep {name}: best = {best[0]} (mean {best[1]['mean_cash']:,.0f}) ---")
-            for v, agg, cash in table:
+            for v, _agg, cash in table:
                 if v == best[0]:
                     continue
                 sig = paired_significance(best[2], cash)
-                print(f"  {name}={best[0]} vs {name}={v}: delta {sig['mean_diff']:+,.0f}  p~{sig['p_approx']}  "
-                      f"better on {sig['a_better']}/{sig['n']}")
+                print(
+                    f"  {name}={best[0]} vs {name}={v}: delta {sig['mean_diff']:+,.0f}  p~{sig['p_approx']}  "
+                    f"better on {sig['a_better']}/{sig['n']}"
+                )
             if args.json:
-                _dump_json(args.json, {"sweep": name, "results": [(v, a) for v, a, _ in table], "best": best[0]})
+                _dump_json(
+                    args.json,
+                    {"sweep": name, "results": [(v, a) for v, a, _ in table], "best": best[0]},
+                )
             return 0
 
         save_reps = True if args.record_elite else args.save_replays
         results, logs = run_set(
-            agent_path, opp, seeds, args.steps, args.workers, args.log_decisions,
-            "run", save_replays=save_reps,
+            agent_path,
+            opp,
+            seeds,
+            args.steps,
+            args.workers,
+            args.log_decisions,
+            "run",
+            save_replays=save_reps,
         )
         agg = aggregate(results, logs)
         print_report(f"{os.path.basename(args.agent)} vs {args.opponent}", agg)
@@ -603,7 +721,7 @@ def main(argv=None):
                     decision_log_src=dl,
                 ):
                     added_count += 1
-            print(f"\n--- ELITE TRAJECTORY RECORDER ---")
+            print("\n--- ELITE TRAJECTORY RECORDER ---")
             print(f"  Added {added_count} elite trajectory candidate(s) to {args.elite_dir}")
             print(f"  Current buffer size: {len(recorder.entries)} / {recorder.top_k}")
             if recorder.entries:
@@ -623,10 +741,16 @@ def _print_acceptance(agg, args):
         ("zero crashes", agg["crashes"] == 0, f"{agg['crashes']}"),
         ("zero timeouts", agg["timeouts"] == 0, f"{agg['timeouts']}"),
         ("zero invalid statuses", agg["invalid"] == 0, f"{agg['invalid']}"),
-        ("p95 turn < 50% of budget", agg["turn_p95"] < budget * 0.5,
-         f"{agg['turn_p95'] * 1000:.1f}ms vs {budget * 500:.0f}ms"),
-        ("beats opponent mean cash", agg["mean_cash"] > agg["opp_mean_cash"],
-         f"{agg['mean_cash']:,.0f} vs {agg['opp_mean_cash']:,.0f}"),
+        (
+            "p95 turn < 50% of budget",
+            agg["turn_p95"] < budget * 0.5,
+            f"{agg['turn_p95'] * 1000:.1f}ms vs {budget * 500:.0f}ms",
+        ),
+        (
+            "beats opponent mean cash",
+            agg["mean_cash"] > agg["opp_mean_cash"],
+            f"{agg['mean_cash']:,.0f} vs {agg['opp_mean_cash']:,.0f}",
+        ),
         ("win rate > 50%", agg["win_rate"] > 0.5, f"{agg['win_rate']:.1%}"),
     ]
     print("\n  acceptance criteria")
@@ -660,7 +784,9 @@ def summarize_replay(path):
         data = json.load(f)
     steps = data.get("steps", [])
     print(f"replay {p}")
-    print(f"  env {data.get('name')}  steps {len(steps)}  seed {(data.get('info') or {}).get('seed')}")
+    print(
+        f"  env {data.get('name')}  steps {len(steps)}  seed {(data.get('info') or {}).get('seed')}"
+    )
     if not steps:
         return 0
     final = steps[-1]
@@ -677,8 +803,12 @@ def summarize_replay(path):
         m0, m1 = farms[0].get("money", 0), farms[1].get("money", 0)
         tiles0 = farms[0].get("tiles") or []
         animals = sum(1 for row in tiles0 for t in row if isinstance(t, dict) and t.get("animal"))
-        plants = sum(1 for row in tiles0 for t in row if isinstance(t, dict) and t.get("kind") == "PLANT")
-        print(f"    day {day:2d}  ${m0:>12,.0f} / ${m1:>12,.0f}   p0 animals={animals} plants={plants}")
+        plants = sum(
+            1 for row in tiles0 for t in row if isinstance(t, dict) and t.get("kind") == "PLANT"
+        )
+        print(
+            f"    day {day:2d}  ${m0:>12,.0f} / ${m1:>12,.0f}   p0 animals={animals} plants={plants}"
+        )
     return 0
 
 

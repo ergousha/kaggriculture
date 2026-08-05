@@ -13,11 +13,13 @@ from typing import Any
 try:
     import gymnasium as gym
     from gymnasium import spaces
+
     _HAS_GYM = True
 except ImportError:
     try:
         import gym  # type: ignore
         from gym import spaces  # type: ignore
+
         _HAS_GYM = True
     except ImportError:
         gym = None  # type: ignore
@@ -34,8 +36,7 @@ _BaseEnv: type = gym.Env if (_HAS_GYM and gym is not None) else object
 class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
     """Gymnasium environment for Kaggriculture strategy optimization."""
 
-    metadata = {"render_modes": []}
-
+    metadata: dict[str, list] = {"render_modes": []}
 
     def __init__(
         self,
@@ -72,7 +73,6 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
             self.action_space = None
             self.observation_space = None
 
-
         self._curr_seed: int = 42
         self._curr_step: int = 0
         self._env: Any = None
@@ -90,7 +90,6 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
     ) -> tuple[Any, dict[str, Any]]:
         if _HAS_GYM:
             super().reset(seed=seed)
-
 
         if seed is not None:
             self._curr_seed = seed
@@ -127,7 +126,7 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
         )
 
         try:
-            env.run(agents)
+            env.run(agents)  # pyrefly: ignore [bad-argument-type]
             final_step = env.steps[-1]
             rewards = [s.get("reward", 0.0) or 0.0 for s in final_step]
             statuses = [s.get("status", "DONE") for s in final_step]
@@ -190,7 +189,9 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
         if name in builtin:
             return builtin[name]
         if name == "adaptive":
-            p = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "opponents", "adaptive.py"))
+            p = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "opponents", "adaptive.py")
+            )
             if os.path.exists(p):
                 return p
         if os.path.exists(name):
@@ -200,6 +201,7 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
     def close(self) -> None:
         if os.path.exists(self._workdir):
             import shutil
+
             try:
                 shutil.rmtree(self._workdir)
             except OSError:

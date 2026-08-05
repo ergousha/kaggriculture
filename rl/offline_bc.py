@@ -33,13 +33,12 @@ class OfflineBCAnalyzer:
             print(f"[OfflineBC] Dataset file not found at {self.dataset_path}", file=sys.stderr)
             return {}
 
-
         total_records = 0
         total_runs = set()
         day_cash: dict[int, list[float]] = {}
         day_hands: dict[int, list[int]] = {}
 
-        with open(self.dataset_path, "r") as f:
+        with open(self.dataset_path) as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -63,7 +62,7 @@ class OfflineBCAnalyzer:
         avg_cash_by_day = {d: sum(vals) / len(vals) for d, vals in day_cash.items() if vals}
         max_hands_observed = max([max(v) for v in day_hands.values()]) if day_hands else 12
 
-        print(f"=== Offline Behavior Cloning Analysis ===")
+        print("=== Offline Behavior Cloning Analysis ===")
         print(f"Dataset Path:   {self.dataset_path}")
         print(f"Total Trajectories Analyzed: {len(total_runs)}")
         print(f"Total Turn Decision Records: {total_records}")

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-import sys
 import unittest
 
-from rl.strategy_space import StrategySpace, PARAM_DEFS
-from rl.kaggriculture_env import KaggricultureGymEnv
-from rl.train_strategy_rl import RLStrategyOptimizer
-from rl.offline_bc import OfflineBCAnalyzer
 from rl.distill_to_main import StrategyDistiller
+from rl.kaggriculture_env import KaggricultureGymEnv
+from rl.offline_bc import OfflineBCAnalyzer
+from rl.strategy_space import StrategySpace
+from rl.train_strategy_rl import RLStrategyOptimizer
 
 
 class TestRLSmoke(unittest.TestCase):
@@ -19,7 +18,7 @@ class TestRLSmoke(unittest.TestCase):
     def test_01_strategy_space_encoding(self) -> None:
         space = StrategySpace()
         self.assertGreater(space.dim, 0)
-        
+
         default_vec = space.get_default_vector()
         self.assertEqual(len(default_vec), space.dim)
         for val in default_vec:

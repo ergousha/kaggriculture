@@ -38,8 +38,20 @@ HISTORY = os.path.join(LOG_DIR, "submission_history.md")
 # main.py must be self-contained: stdlib only. numpy is permitted because the
 # Kaggle image provides it, but main.py currently does not need it.
 ALLOWED_IMPORTS = {
-    "math", "os", "time", "traceback", "json", "random", "collections",
-    "itertools", "functools", "heapq", "bisect", "statistics", "copy", "sys",
+    "math",
+    "os",
+    "time",
+    "traceback",
+    "json",
+    "random",
+    "collections",
+    "itertools",
+    "functools",
+    "heapq",
+    "bisect",
+    "statistics",
+    "copy",
+    "sys",
     "numpy",
 }
 
@@ -51,10 +63,17 @@ ALLOWED_IMPORTS = {
 
 def load_credentials() -> str:
     """Export credentials to the environment. Returns the method used."""
+    env_token = (
+        os.environ.get("KAGGLE_API_TOKEN", "") or os.environ.get("KAGGLE_TOKEN", "")
+    ).strip()
+    if env_token:
+        os.environ["KAGGLE_API_TOKEN"] = env_token
+        return "access token (environment)"
+
     try:
         sys.path.insert(0, HERE)
         import kaggle_credentials as creds  # noqa: WPS433
-    except ImportError:
+    except ImportError as exc:
         print(
             "ERROR: kaggle_credentials.py not found.\n"
             "\n"
@@ -66,7 +85,7 @@ def load_credentials() -> str:
             "into a published notebook: it grants full API access to your account.",
             file=sys.stderr,
         )
-        raise SystemExit(2)
+        raise SystemExit(2) from exc
 
     token = (getattr(creds, "KAGGLE_API_TOKEN", "") or "").strip()
     user = (getattr(creds, "KAGGLE_USERNAME", "") or "").strip()
@@ -108,7 +127,9 @@ def check_static() -> list[str]:
                 imported.add(a.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                fails.append(f"relative import (level {node.level}) — submission must be self-contained")
+                fails.append(
+                    f"relative import (level {node.level}) — submission must be self-contained"
+                )
             elif node.module:
                 imported.add(node.module.split(".")[0])
     bad = sorted(imported - ALLOWED_IMPORTS)
@@ -124,7 +145,9 @@ def check_static() -> list[str]:
     else:
         nargs = len(agent_def.args.args)
         if nargs not in (1, 2):
-            fails.append(f"`agent` takes {nargs} positional args; the env passes (obs) or (obs, config)")
+            fails.append(
+                f"`agent` takes {nargs} positional args; the env passes (obs) or (obs, config)"
+            )
         # kaggle-environments: get_last_callable() returns
         # [v for v in env.values() if callable(v)][-1] — the LAST callable bound
         # in module namespace order. A helper defined after `agent` becomes the
@@ -153,7 +176,9 @@ def check_loadable() -> list[str]:
         with open(SUBMISSION) as f:
             fn = get_last_callable(f.read(), path=SUBMISSION)
         if getattr(fn, "__name__", None) != "agent":
-            fails.append(f"env would load `{getattr(fn, '__name__', fn)}` as the agent, not `agent`")
+            fails.append(
+                f"env would load `{getattr(fn, '__name__', fn)}` as the agent, not `agent`"
+            )
     except Exception as exc:
         fails.append(f"main.py failed to load as an agent: {type(exc).__name__}: {exc}")
     return fails
@@ -166,8 +191,13 @@ def smoke_test(episodes: int, opponent: str) -> tuple[list[str], dict]:
 
     seeds = [1000 + i for i in range(episodes)]
     results, logs = local_arena.run_set(
-        SUBMISSION, local_arena.resolve_opponent(opponent, SUBMISSION, LOG_DIR),
-        seeds, 720, min(episodes, max(1, (os.cpu_count() or 2) - 1)), False, "preflight",
+        SUBMISSION,
+        local_arena.resolve_opponent(opponent, SUBMISSION, LOG_DIR),
+        seeds,
+        720,
+        min(episodes, max(1, (os.cpu_count() or 2) - 1)),
+        False,
+        "preflight",
     )
     agg = local_arena.aggregate(results, logs)
     fails = []
@@ -210,7 +240,10 @@ def append_history(message: str, agg: dict, opponent: str, submitted: bool) -> N
     try:
         diff = subprocess.run(
             ["git", "diff", "--stat", "HEAD", "--", "main.py"],
-            cwd=HERE, capture_output=True, text=True, timeout=10,
+            cwd=HERE,
+            capture_output=True,
+            text=True,
+            timeout=10,
         ).stdout.strip()
     except Exception:
         diff = ""
@@ -284,7 +317,9 @@ def main(argv=None) -> int:
     ap.add_argument("-m", "--message", help="submission message (default: auto from arena stats)")
     ap.add_argument("--episodes", type=int, default=3, help="smoke-test episodes (spec minimum 3)")
     ap.add_argument("--opponent", default="baseline")
-    ap.add_argument("--skip-smoke", action="store_true", help="skip the smoke test (NOT for real submits)")
+    ap.add_argument(
+        "--skip-smoke", action="store_true", help="skip the smoke test (NOT for real submits)"
+    )
     args = ap.parse_args(argv)
 
     print(f"Kaggriculture submit — v{agent_version()}")
@@ -305,7 +340,7 @@ def main(argv=None) -> int:
         print("  ok")
     fails += lf
 
-    agg = {}
+    agg: dict = {}
     if args.skip_smoke:
         print("\n[3/4] smoke test SKIPPED (--skip-smoke)")
         if not args.dry_run:
@@ -336,7 +371,9 @@ def main(argv=None) -> int:
         print("  --dry-run: no submission made")
         print("\n  To fetch the reference notebooks for comparison (needs credentials):")
         print("    kaggle kernels pull bovard/kaggriculture-getting-started -p reference/")
-        print("    kaggle kernels pull tetsutani/adaptive-farming-strategy-for-kaggriculture -p reference/")
+        print(
+            "    kaggle kernels pull tetsutani/adaptive-farming-strategy-for-kaggriculture -p reference/"
+        )
         if agg:
             append_history(message, agg, args.opponent, submitted=False)
         return 0

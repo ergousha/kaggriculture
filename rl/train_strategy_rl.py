@@ -78,7 +78,7 @@ class RLStrategyOptimizer:
         candidate_vector: list[float],
         seeds: list[int],
         opponents: list[str],
-        pool: mp.Pool,
+        pool: Any,
     ) -> dict[str, Any]:
         """Evaluate a strategy candidate vector across paired seeds and opponents."""
         tasks = []
@@ -120,7 +120,7 @@ class RLStrategyOptimizer:
         base_seed: int = 100,
     ) -> dict[str, Any]:
         """Run evolutionary RL strategy optimization loop."""
-        print(f"=== Kaggriculture RL Strategy Optimizer ===")
+        print("=== Kaggriculture RL Strategy Optimizer ===")
         print(f"Strategy Space Dim: {self.space.dim}")
         print(f"Population Size:    {self.pop_size} | Elites: {self.elite_size}")
         print(f"Episodes/Eval:     {self.episodes_per_eval} | Workers: {self.n_workers}")
@@ -143,10 +143,7 @@ class RLStrategyOptimizer:
 
         pool = mp.Pool(processes=self.n_workers)
 
-
         try:
-
-
             for gen in range(1, generations + 1):
                 start_t = time.time()
 
@@ -162,35 +159,44 @@ class RLStrategyOptimizer:
                         f"  [Gen {gen}/{generations} | Cand {idx:02d}/{self.pop_size:02d}] "
                         f"Score: {res['fitness_score']:>8.1f} | "
                         f"Cash: ${res['mean_cash']:>8.2f} | Opp: ${res['mean_opp_cash']:>8.2f} | "
-                        f"WinRate: {res['win_rate']*100:>5.1f}%"
+                        f"WinRate: {res['win_rate'] * 100:>5.1f}%"
                     )
 
                 # Rank population by fitness score
                 eval_results.sort(key=lambda x: x["fitness_score"], reverse=True)
                 top_cand = eval_results[0]
 
-                if best_overall is None or top_cand["fitness_score"] > best_overall["fitness_score"]:
+                if (
+                    best_overall is None
+                    or top_cand["fitness_score"] > best_overall["fitness_score"]
+                ):
                     best_overall = top_cand
 
                 elapsed_gen = time.time() - start_t
                 total_elapsed = time.time() - train_start_t
                 avg_gen_t = total_elapsed / gen
                 est_rem_t = avg_gen_t * (generations - gen)
-                rem_str = f"{int(est_rem_t // 60)}m {int(est_rem_t % 60)}s" if est_rem_t > 60 else f"{est_rem_t:.1f}s"
+                rem_str = (
+                    f"{int(est_rem_t // 60)}m {int(est_rem_t % 60)}s"
+                    if est_rem_t > 60
+                    else f"{est_rem_t:.1f}s"
+                )
 
                 log_msg(
                     f"Gen {gen}/{generations} Complete | Leader Cash: ${top_cand['mean_cash']:,.2f} "
-                    f"(WinRate: {top_cand['win_rate']*100:.1f}%) | Gen Time: {elapsed_gen:.1f}s | "
+                    f"(WinRate: {top_cand['win_rate'] * 100:.1f}%) | Gen Time: {elapsed_gen:.1f}s | "
                     f"Est. Remaining: {rem_str}\n"
                 )
 
-                history.append({
-                    "generation": gen,
-                    "top_score": top_cand["fitness_score"],
-                    "top_cash": top_cand["mean_cash"],
-                    "top_params": top_cand["param_dict"],
-                    "elapsed_sec": round(elapsed_gen, 2),
-                })
+                history.append(
+                    {
+                        "generation": gen,
+                        "top_score": top_cand["fitness_score"],
+                        "top_cash": top_cand["mean_cash"],
+                        "top_params": top_cand["param_dict"],
+                        "elapsed_sec": round(elapsed_gen, 2),
+                    }
+                )
 
                 # Produce next generation (Elitism + Mutation)
                 elites = [r["strategy_vector"] for r in eval_results[: self.elite_size]]
@@ -216,8 +222,6 @@ class RLStrategyOptimizer:
             except OSError:
                 pass
 
-
-
         # Save best strategy checkpoint
         best_path = os.path.join(self.output_dir, "best_strategy.json")
         history_path = os.path.join(self.output_dir, "training_history.json")
@@ -236,10 +240,14 @@ class RLStrategyOptimizer:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-process RL Strategy Optimizer")
     parser.add_argument("--agent", default="main.py", help="Path to base main.py agent")
-    parser.add_argument("--generations", type=int, default=5, help="Number of evolutionary generations")
+    parser.add_argument(
+        "--generations", type=int, default=5, help="Number of evolutionary generations"
+    )
     parser.add_argument("--pop-size", type=int, default=8, help="Population size per generation")
     parser.add_argument("--episodes", type=int, default=6, help="Episodes per candidate evaluation")
-    parser.add_argument("--opponents", default="baseline,adaptive", help="Comma-separated opponent list")
+    parser.add_argument(
+        "--opponents", default="baseline,adaptive", help="Comma-separated opponent list"
+    )
     parser.add_argument("--output", default="logs/rl_strategies", help="Output directory")
     args = parser.parse_args()
 

@@ -41,17 +41,73 @@ AGENT_VERSION = "0.0.1"
 # ---------------------------------------------------------------------------
 
 CROPS = {
-    "WHEAT":      {"seed": 10, "first_yield_day": 2, "max_yield_day": 4, "interval": 0, "max_yield": 6, "ongoing": False},
-    "CARROT":     {"seed": 20, "first_yield_day": 2, "max_yield_day": 3, "interval": 0, "max_yield": 4, "ongoing": False},
-    "TOMATO":     {"seed": 50, "first_yield_day": 8, "max_yield_day": 8, "interval": 1, "max_yield": 4, "ongoing": True},
-    "STRAWBERRY": {"seed": 100, "first_yield_day": 10, "max_yield_day": 10, "interval": 2, "max_yield": 4, "ongoing": True},
-    "MELON":      {"seed": 80, "first_yield_day": 10, "max_yield_day": 12, "interval": 0, "max_yield": 6, "ongoing": False},
+    "WHEAT": {
+        "seed": 10,
+        "first_yield_day": 2,
+        "max_yield_day": 4,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
+    "CARROT": {
+        "seed": 20,
+        "first_yield_day": 2,
+        "max_yield_day": 3,
+        "interval": 0,
+        "max_yield": 4,
+        "ongoing": False,
+    },
+    "TOMATO": {
+        "seed": 50,
+        "first_yield_day": 8,
+        "max_yield_day": 8,
+        "interval": 1,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "STRAWBERRY": {
+        "seed": 100,
+        "first_yield_day": 10,
+        "max_yield_day": 10,
+        "interval": 2,
+        "max_yield": 4,
+        "ongoing": True,
+    },
+    "MELON": {
+        "seed": 80,
+        "first_yield_day": 10,
+        "max_yield_day": 12,
+        "interval": 0,
+        "max_yield": 6,
+        "ongoing": False,
+    },
 }
 
 ANIMALS = {
-    "GOOSE": {"cost": 300, "structure": "COOP",    "first_yield_day": 4, "interval": 1, "max_held": 4, "product": "EGG"},
-    "COW":   {"cost": 400, "structure": "PASTURE", "first_yield_day": 8, "interval": 2, "max_held": 6, "product": "MILK"},
-    "SHEEP": {"cost": 500, "structure": "PASTURE", "first_yield_day": 6, "interval": 3, "max_held": 6, "product": "WOOL"},
+    "GOOSE": {
+        "cost": 300,
+        "structure": "COOP",
+        "first_yield_day": 4,
+        "interval": 1,
+        "max_held": 4,
+        "product": "EGG",
+    },
+    "COW": {
+        "cost": 400,
+        "structure": "PASTURE",
+        "first_yield_day": 8,
+        "interval": 2,
+        "max_held": 6,
+        "product": "MILK",
+    },
+    "SHEEP": {
+        "cost": 500,
+        "structure": "PASTURE",
+        "first_yield_day": 6,
+        "interval": 3,
+        "max_held": 6,
+        "product": "WOOL",
+    },
 }
 
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
@@ -60,15 +116,87 @@ MARKET_I0 = 10000
 PRICE_FLOOR = 1
 
 MARKET_PARAMS = {
-    "WHEAT":      {"base":  25, "I0": MARKET_I0, "T": 400, "below_func": "sqrt",   "below_target": 0.80, "above_func": "log",    "above_target": 0.20},
-    "CARROT":     {"base":  35, "I0": MARKET_I0, "T": 450, "below_func": "log",    "below_target": 0.20, "above_func": "sqrt",   "above_target": 0.70},
-    "TOMATO":     {"base":  60, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "sqrt",   "above_target": 0.60},
-    "STRAWBERRY": {"base": 120, "I0": MARKET_I0, "T": 100, "below_func": "sqrt",   "below_target": 0.70, "above_func": "linear", "above_target": 1.60},
-    "MELON":      {"base": 250, "I0": MARKET_I0, "T": 300, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.60},
-    "EGG":        {"base":  50, "I0": MARKET_I0, "T": 332, "below_func": "linear", "below_target": 0.40, "above_func": "log",    "above_target": 0.20},
-    "MILK":       {"base": 160, "I0": MARKET_I0, "T": 122, "below_func": "sqrt",   "below_target": 0.60, "above_func": "linear", "above_target": 1.60},
-    "WOOL":       {"base": 200, "I0": MARKET_I0, "T": 105, "below_func": "log",    "below_target": 0.20, "above_func": "sq",     "above_target": 3.20},
-    "FERTILIZER": {"base": 100, "I0": MARKET_I0, "T": 200, "below_func": "linear", "below_target": 0.40, "above_func": "linear", "above_target": 0.40},
+    "WHEAT": {
+        "base": 25,
+        "I0": MARKET_I0,
+        "T": 400,
+        "below_func": "sqrt",
+        "below_target": 0.80,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "CARROT": {
+        "base": 35,
+        "I0": MARKET_I0,
+        "T": 450,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sqrt",
+        "above_target": 0.70,
+    },
+    "TOMATO": {
+        "base": 60,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "sqrt",
+        "above_target": 0.60,
+    },
+    "STRAWBERRY": {
+        "base": 120,
+        "I0": MARKET_I0,
+        "T": 100,
+        "below_func": "sqrt",
+        "below_target": 0.70,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "MELON": {
+        "base": 250,
+        "I0": MARKET_I0,
+        "T": 300,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.60,
+    },
+    "EGG": {
+        "base": 50,
+        "I0": MARKET_I0,
+        "T": 332,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "log",
+        "above_target": 0.20,
+    },
+    "MILK": {
+        "base": 160,
+        "I0": MARKET_I0,
+        "T": 122,
+        "below_func": "sqrt",
+        "below_target": 0.60,
+        "above_func": "linear",
+        "above_target": 1.60,
+    },
+    "WOOL": {
+        "base": 200,
+        "I0": MARKET_I0,
+        "T": 105,
+        "below_func": "log",
+        "below_target": 0.20,
+        "above_func": "sq",
+        "above_target": 3.20,
+    },
+    "FERTILIZER": {
+        "base": 100,
+        "I0": MARKET_I0,
+        "T": 200,
+        "below_func": "linear",
+        "below_target": 0.40,
+        "above_func": "linear",
+        "above_target": 0.40,
+    },
 }
 
 LAND_ORDER = ["NE", "SW", "SE"]
@@ -86,19 +214,19 @@ MOVE_OF_DELTA = {(0, -1): "NORTH", (0, 1): "SOUTH", (1, 0): "EAST", (-1, 0): "WE
 
 FLAGS = {
     # Hire farm hands every day (cost is fib(n) for the n-th hire of the day).
-    "HIRE_HANDS": True,               # TUNED: +517.7% mean cash vs OFF, p~0.0, better on 20/20
-                                      #        (--ablate, 20 paired seeds vs baseline)
+    "HIRE_HANDS": True,  # TUNED: +517.7% mean cash vs OFF, p~0.0, better on 20/20
+    #        (--ablate, 20 paired seeds vs baseline)
     # Buy the NE/SW/SE quadrants as cash allows.
-    "EXPAND_LAND": True,              # TUNED: +199.1% mean cash vs OFF, p~0.0, better on 19/20
+    "EXPAND_LAND": True,  # TUNED: +199.1% mean cash vs OFF, p~0.0, better on 19/20
     # Race the opponent for the capped wool/milk pots with 2 sheep + 2 cows.
-    "PREMIUM_LIVESTOCK": True,        # TUNED: +17.8% mean cash vs OFF, p~0.020, better on 14/20
+    "PREMIUM_LIVESTOCK": True,  # TUNED: +17.8% mean cash vs OFF, p~0.020, better on 14/20
     # Spend an action on CARE, which banks +1 yield on the next production tick.
-    "ANIMAL_CARE": True,              # TUNED: +31.0% mean cash vs OFF in self-play (p~0.021,
-                                      #        better on 22/30 seeds). Not resolvable against the
-                                      #        scripted opponents (+0.5% p~0.95 vs baseline,
-                                      #        +2.9% p~0.56 vs adaptive), where melon dominates
-                                      #        income; the direct-call measurement is unambiguous
-                                      #        though -- 26 vs 12 eggs per goose over 16 days.
+    "ANIMAL_CARE": True,  # TUNED: +31.0% mean cash vs OFF in self-play (p~0.021,
+    #        better on 22/30 seeds). Not resolvable against the
+    #        scripted opponents (+0.5% p~0.95 vs baseline,
+    #        +2.9% p~0.56 vs adaptive), where melon dominates
+    #        income; the direct-call measurement is unambiguous
+    #        though -- 26 vs 12 eggs per goose over 16 days.
 }
 
 # REMOVED after measurement, not kept as dead flags:
@@ -117,66 +245,65 @@ FLAGS = {
 # so a day of 13 hands costs $609 but a day of 16 costs $2,583. Despite that
 # steep tail, labour is the binding constraint: 16 is a sharp optimum, and both
 # fewer (cheaper) and more (cash-throttled) hands do much worse.
-MAX_HANDS = 16                        # TUNED: mean $21,822 vs $10,629 @13 and $11,190 @20
-                                      #        (--sweep MAX_HANDS=13,16,20,24, 20 paired seeds,
-                                      #         p~0.0, better on 18/20)
-HIRES_PER_TURN = 6                    # PLACEHOLDER: hires are emitted LAST, into leftover slots
-HIRE_CASH_FRACTION = 0.25             # PLACEHOLDER: never spend >25% of cash on one day's hires
+MAX_HANDS = 16  # TUNED: mean $21,822 vs $10,629 @13 and $11,190 @20
+#        (--sweep MAX_HANDS=13,16,20,24, 20 paired seeds,
+#         p~0.0, better on 18/20)
+HIRES_PER_TURN = 6  # PLACEHOLDER: hires are emitted LAST, into leftover slots
+HIRE_CASH_FRACTION = 0.25  # PLACEHOLDER: never spend >25% of cash on one day's hires
 
 # Animal logistics. BUY_ANIMAL lands stock in the shed; a unit must then PICKUP
 # and PLACE it. Both are rate limits, so purchases must not run ahead of them.
-FERRY_MAX_UNITS = 6                   # PLACEHOLDER: units dedicated to ferrying per turn
-ANIMAL_BACKLOG_CAP = 8                # PLACEHOLDER: max un-placed animals held in the shed
+FERRY_MAX_UNITS = 6  # PLACEHOLDER: units dedicated to ferrying per turn
+ANIMAL_BACKLOG_CAP = 8  # PLACEHOLDER: max un-placed animals held in the shed
 
 # Land. $1k/$2k/$4k. Reserve enough to keep buying geese after the purchase.
-LAND_CASH_BUFFER = 1200               # PLACEHOLDER: ~4 geese of headroom kept after a land buy
-LAND_EXPAND_SLACK = 2                 # PLACEHOLDER: max unstocked coops tolerated before expanding
-LAND_RICH_BUFFER = 3500               # PLACEHOLDER: buy land regardless of slack when this rich
-LAND_LAST_DAY = 22                    # PLACEHOLDER: new tiles need ~6 days to repay a coop
+LAND_CASH_BUFFER = 1200  # PLACEHOLDER: ~4 geese of headroom kept after a land buy
+LAND_EXPAND_SLACK = 2  # PLACEHOLDER: max unstocked coops tolerated before expanding
+LAND_RICH_BUFFER = 3500  # PLACEHOLDER: buy land regardless of slack when this rich
+LAND_LAST_DAY = 22  # PLACEHOLDER: new tiles need ~6 days to repay a coop
 
 # Livestock ROI guards. A goose matures in 4 days then yields 2 eggs/day with
 # CARE; at ~$38/egg minus 1 wheat it repays $300 in ~5 days, so it needs roughly
 # 9 days of season left to be worth buying.
-GOOSE_MIN_DAYS_LEFT = 9               # PLACEHOLDER: 4d to mature + ~5d payback at ~$38/egg
-SHEEP_MIN_DAYS_LEFT = 12              # PLACEHOLDER: 6 days to mature + 2 production ticks
-COW_MIN_DAYS_LEFT = 13                # PLACEHOLDER: 8 days to mature + 2 production ticks
-MAX_SHEEP = 2                         # PLACEHOLDER: wool floors past ~55 units; 2 sheep ~cover it
-PREMIUM_MIN_TILES = 28                # PLACEHOLDER: no pasture until past the 24-tile NW opening
-MAX_COWS = 2                          # PLACEHOLDER: milk floors past ~55 units; 2 cows ~cover it
+GOOSE_MIN_DAYS_LEFT = 9  # PLACEHOLDER: 4d to mature + ~5d payback at ~$38/egg
+SHEEP_MIN_DAYS_LEFT = 12  # PLACEHOLDER: 6 days to mature + 2 production ticks
+COW_MIN_DAYS_LEFT = 13  # PLACEHOLDER: 8 days to mature + 2 production ticks
+MAX_SHEEP = 2  # PLACEHOLDER: wool floors past ~55 units; 2 sheep ~cover it
+PREMIUM_MIN_TILES = 28  # PLACEHOLDER: no pasture until past the 24-tile NW opening
+MAX_COWS = 2  # PLACEHOLDER: milk floors past ~55 units; 2 cows ~cover it
 
 # Wheat feed. One wheat per animal per day. Home-grown wheat avoids the buy-side
 # sqrt ramp (price hits $67 after 1800 units drained), so we grow a wheat tile
 # per ~1.6 animals and only buy to cover a shortfall.
-WHEAT_TILES_PER_ANIMAL = 1.0          # PLACEHOLDER: a wheat tile yields ~1/day; a goose eats 1/day
-WHEAT_FEED_DAYS_RESERVE = 3           # PLACEHOLDER: keep 3 days of feed in the shed
-WHEAT_MAX_BUY_PRICE = 70              # PLACEHOLDER: above this, let animals go hungry a day instead
-FEED_GATE_MAX = 50                    # PLACEHOLDER: feed-gate ceiling; shed cap is 100 total
-WHEAT_CARRY_PER_UNIT = 6              # PLACEHOLDER: wheat a unit picks up per shed trip
+WHEAT_TILES_PER_ANIMAL = 1.0  # PLACEHOLDER: a wheat tile yields ~1/day; a goose eats 1/day
+WHEAT_FEED_DAYS_RESERVE = 3  # PLACEHOLDER: keep 3 days of feed in the shed
+WHEAT_MAX_BUY_PRICE = 70  # PLACEHOLDER: above this, let animals go hungry a day instead
+FEED_GATE_MAX = 50  # PLACEHOLDER: feed-gate ceiling; shed cap is 100 total
+WHEAT_CARRY_PER_UNIT = 6  # PLACEHOLDER: wheat a unit picks up per shed trip
 
 # Melon: the biggest capped pot ($26.5k). 12 days plant->harvest, so the last
 # plantable day is 29-12 = 17.
-MELON_TILE_TARGET = 18                # PLACEHOLDER: ~108 melons/cycle vs a ~130-unit pot
-MELON_LAND_FRACTION = 0.50            # TUNED: mean $22,126 vs $16,606 @0.35 and $7,481 @0.75
-                                      #        (--sweep, 20 paired seeds). 0.50 and 0.60 tie
-                                      #        (p~0.88); 0.50 preferred because the melon pot is
-                                      #        SHARED with the opponent, so leaning less on it is
-                                      #        the safer side of a plateau.
-MELON_LAST_PLANT_DAY = 17             # DERIVED: max_yield_day 12, season ends day 29
-
+MELON_TILE_TARGET = 18  # PLACEHOLDER: ~108 melons/cycle vs a ~130-unit pot
+MELON_LAND_FRACTION = 0.50  # TUNED: mean $22,126 vs $16,606 @0.35 and $7,481 @0.75
+#        (--sweep, 20 paired seeds). 0.50 and 0.60 tie
+#        (p~0.88); 0.50 preferred because the melon pot is
+#        SHARED with the opponent, so leaning less on it is
+#        the safer side of a plateau.
+MELON_LAST_PLANT_DAY = 17  # DERIVED: max_yield_day 12, season ends day 29
 
 
 # Safety guard: actTimeout is 1.0s/turn with a 60s overage bank for the episode.
-TURN_TIME_BUDGET = 1.0                # DERIVED: kaggriculture.json actTimeout
-TIME_GUARD_FRACTION = 0.70            # Spec requirement: bail at 70% of budget
+TURN_TIME_BUDGET = 1.0  # DERIVED: kaggriculture.json actTimeout
+TIME_GUARD_FRACTION = 0.70  # Spec requirement: bail at 70% of budget
 
-MAX_MARKET_ORDERS = 10                # DERIVED: maxMarketOrdersPerTurn default
+MAX_MARKET_ORDERS = 10  # DERIVED: maxMarketOrdersPerTurn default
 
 # Task priorities. Higher wins. Survival beats yield: a plant at
 # consecutive_unwatered>=1 dies tonight, an animal at consecutive_unfed>=1 escapes
 # tonight and is unrecoverable.
 PRIO_FEED_URGENT = 1000
 PRIO_WATER_URGENT = 950
-PRIO_HARVEST_ANIMAL_FULL = 900        # at max_held further production is wasted
+PRIO_HARVEST_ANIMAL_FULL = 900  # at max_held further production is wasted
 PRIO_PLACE_ANIMAL = 880
 PRIO_HARVEST_CROP = 850
 PRIO_WATER_BONUS = 800
@@ -252,7 +379,6 @@ class MarketAnalyzer:
         return self.price_at(item, self.inventory.get(item, MARKET_I0) - 1)
 
 
-
 # ---------------------------------------------------------------------------
 # Opponent tracking (their farm IS public — only shed/seeds/inventories are not)
 # ---------------------------------------------------------------------------
@@ -320,7 +446,6 @@ class OpponentTracker:
             self.profile = "UNKNOWN"
 
 
-
 # ---------------------------------------------------------------------------
 # Strategic planner (macro: money, land, labour, tile roles)
 # ---------------------------------------------------------------------------
@@ -331,7 +456,7 @@ class StrategicPlanner:
     hands to hire, when to buy land and livestock, and what to sell."""
 
     def __init__(self):
-        self.roles = {}          # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
+        self.roles = {}  # (x, y) -> "COOP" | "PASTURE_SHEEP" | ... | "MELON" | "WHEAT"
         self.last_role_day = -1
 
     # -- tile roles ---------------------------------------------------------
@@ -467,14 +592,18 @@ class StrategicPlanner:
                 # not the early constraint -- cash is. Buying NE on day 0 spent
                 # a third of the opening bank on tiles we had no birds for.
                 unstocked = sum(
-                    1 for (rx, ry), r in self.roles.items()
-                    if r == "COOP" and not (
+                    1
+                    for (rx, ry), r in self.roles.items()
+                    if r == "COOP"
+                    and not (
                         isinstance(farm["tiles"][ry][rx], dict)
                         and farm["tiles"][ry][rx].get("animal")
                     )
                 )
                 rich = discretionary >= price + LAND_RICH_BUFFER
-                if (unstocked <= LAND_EXPAND_SLACK or rich) and discretionary >= price + LAND_CASH_BUFFER:
+                if (
+                    unstocked <= LAND_EXPAND_SLACK or rich
+                ) and discretionary >= price + LAND_CASH_BUFFER:
                     orders.append(["BUY_LAND"])
                     cash -= price
                     discretionary -= price
@@ -795,10 +924,12 @@ class SpatialScheduler:
         used_units = set()
         used_tiles = set()
 
-        self._ferry_animals(actions, used_units, used_tiles, units, farm, private, board, roles, log)
+        self._ferry_animals(
+            actions, used_units, used_tiles, units, farm, private, board, roles, log
+        )
         self._provision_feed(actions, used_units, units, farm, private, board, log)
 
-        for prio, tx, ty, op, req in tasks:
+        for _prio, tx, ty, op, req in tasks:
             if (tx, ty) in used_tiles:
                 continue
             best = None
@@ -832,7 +963,9 @@ class SpatialScheduler:
         log["assigned_units"] = len(used_units)
         return actions
 
-    def _ferry_animals(self, actions, used_units, used_tiles, units, farm, private, board, roles, log):
+    def _ferry_animals(
+        self, actions, used_units, used_tiles, units, farm, private, board, roles, log
+    ):
         """Dedicate units to the two-step chain that stocks a structure.
 
         Placing one goose is worth roughly $1.5k over a season — far more than
@@ -1166,7 +1299,7 @@ def _hire_cost(n_already_today):
 # one player's plan leak into the other's.
 # ---------------------------------------------------------------------------
 
-_STATE = {}
+_STATE: dict = {}
 
 
 class _PlayerState:
@@ -1250,9 +1383,24 @@ def _decide(obs, config, st, log):
 
 
 UNIT_OPS = {
-    "NORTH", "SOUTH", "EAST", "WEST", "PASS", "PICKUP", "PLACE", "DROP",
-    "PLANT", "WATER", "HARVEST", "FERTILIZE", "BUILD_COOP", "BUILD_PASTURE",
-    "DIG", "FEED", "COLLECT_FERTILIZER", "CARE",
+    "NORTH",
+    "SOUTH",
+    "EAST",
+    "WEST",
+    "PASS",
+    "PICKUP",
+    "PLACE",
+    "DROP",
+    "PLANT",
+    "WATER",
+    "HARVEST",
+    "FERTILIZE",
+    "BUILD_COOP",
+    "BUILD_PASTURE",
+    "DIG",
+    "FEED",
+    "COLLECT_FERTILIZER",
+    "CARE",
 }
 
 
