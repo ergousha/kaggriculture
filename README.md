@@ -37,30 +37,18 @@ uv run python submit.py --dry-run
 
 ---
 
-## Ground truth
+## Implementation Notes
 
-**The initial specification's assumed mechanics were wrong in several places.** Everything below was read
-out of `kaggle_environments/envs/kaggriculture/kaggriculture.py` in the installed
-package and re-verified by direct calls into the env's own functions. Corrections:
+The following mechanics are useful to keep in mind when designing the agent:
 
-| Specification assumed | Actually |
-| --- | --- |
-| Submit `agent/submission.py` | Kaggle requires **`main.py`** at the archive root |
-| `agent(obs, config)` | Either arity works; the env slices args to `co_argcount` |
-| Auth via `KAGGLE_USERNAME`/`KAGGLE_KEY` | Still works (legacy path), but an access token now takes precedence |
-| Hire cost "scales non-linearly" | Exactly `farmHandCostMult * fib(n)`; **16 hands cost $2,583/day** |
-| Opponent data may be unobservable | Their **whole farm is public** — money, tiles, hands, quadrants. Only shed/seeds/carried inventories are hidden |
-| Shed cap 100, overflow harvests lost | Confirmed — and it applies to mid-day `PLACE` too, so you cannot stockpile in carried inventories |
-| "Assume < 1s compute budget" | `actTimeout: 1.0`s/turn, plus a **60s overage bank** per episode |
-
-Two more things worth knowing, neither documented in the competition documentation:
-
+- **16 hands cost $2,583/day** (hire cost is `farmHandCostMult * fib(n)`).
+- **The opponent's whole farm is public** — money, tiles, hands, quadrants. Only shed/seeds/carried inventories are hidden.
+- **Shed cap 100 applies to mid-day `PLACE` too**, so you cannot stockpile in carried inventories.
+- **Compute budget:** `actTimeout: 1.0`s/turn, plus a **60s overage bank** per episode.
 - **The env loads the LAST callable defined in your file**, not the one named `agent`
   (`agent.py: get_last_callable` → `[v for v in env.values() if callable(v)][-1]`).
   A helper defined below `agent` silently becomes the agent and every turn errors.
   This cost the first working build 1,436 ERROR statuses. `submit.py` asserts against it.
-- **`CARE` banks `+1`/day, not `+2`** as `AGENTS.md`/`README.md` in the env package claim.
-  Code is truth (`_daily_refresh_animals`).
 
 ### The economics that decide the strategy
 
