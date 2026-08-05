@@ -35,7 +35,9 @@ def download_replay(api: Any, episode_id: int, target_dir: str) -> str | None:
         expected = f"episode-{episode_id}-replay.json"
         src = os.path.join(tmp_dir, expected)
         if not os.path.exists(src):
-            candidates = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")]
+            candidates = [
+                os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")
+            ]
             if not candidates:
                 return None
             src = candidates[0]
@@ -57,7 +59,9 @@ def download_replay(api: Any, episode_id: int, target_dir: str) -> str | None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Download failing episodes for a specific agent version.")
+    parser = argparse.ArgumentParser(
+        description="Download failing episodes for a specific agent version."
+    )
     parser.add_argument("version", help="The description/version of the submission (e.g. 'v0.0.5')")
     parser.add_argument("--limit", type=int, default=10, help="Max failed replays to download")
     parser.add_argument("--competition", type=str, default="kaggriculture", help="Competition name")
@@ -110,7 +114,9 @@ def main():
         opp_agent = None
 
         for a in agents:
-            a_sub_id = getattr(a, "submission_id", None) or (a.get("submissionId") if isinstance(a, dict) else None)
+            a_sub_id = getattr(a, "submission_id", None) or (
+                a.get("submissionId") if isinstance(a, dict) else None
+            )
             if str(a_sub_id) == str(sub_id):
                 my_agent = a
             else:
@@ -146,7 +152,8 @@ def main():
 
     downloaded = 0
     import time
-    for ep_id, my_r, opp_r in failed_eps[:args.limit]:
+
+    for ep_id, my_r, opp_r in failed_eps[: args.limit]:
         print(f"Downloading episode {ep_id} (Reward: {my_r} vs {opp_r})...")
         retries = 3
         for attempt in range(retries):
@@ -159,7 +166,9 @@ def main():
             except Exception as e:
                 if "429" in str(e):
                     wait_time = 15 * (attempt + 1)
-                    print(f" -> Rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{retries}...")
+                    print(
+                        f" -> Rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{retries}..."
+                    )
                     time.sleep(wait_time)
                 else:
                     print(f" -> Error: {e}")
@@ -167,6 +176,7 @@ def main():
         time.sleep(5)
 
     print(f"\nDone! Downloaded {downloaded} failed replays.")
+
 
 if __name__ == "__main__":
     main()
