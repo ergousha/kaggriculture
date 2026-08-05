@@ -143,25 +143,40 @@ class LeaderboardCrawler:
 
         tmp_dir = os.path.join(REPLAY_DIR, "_tmp")
         os.makedirs(tmp_dir, exist_ok=True)
+        retries = 3
         try:
-            self.api.competition_episode_replay(episode_id, path=tmp_dir, quiet=True)
-            expected = f"episode-{episode_id}-replay.json"
-            src = os.path.join(tmp_dir, expected)
-            if not os.path.exists(src):
-                candidates = [
-                    os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")
-                ]
-                if not candidates:
-                    return None
-                src = candidates[0]
-            shutil.move(src, target_path)
-            return target_path
-        except Exception as exc:
-            print(
-                f"[LeaderboardCrawler] Error downloading replay {episode_id}: {exc}",
-                file=sys.stderr,
-            )
-            return None
+            for attempt in range(retries):
+                try:
+                    self.api.competition_episode_replay(episode_id, path=tmp_dir, quiet=True)
+                    expected = f"episode-{episode_id}-replay.json"
+                    src = os.path.join(tmp_dir, expected)
+                    if not os.path.exists(src):
+                        candidates = [
+                            os.path.join(tmp_dir, f)
+                            for f in os.listdir(tmp_dir)
+                            if f.endswith(".json")
+                        ]
+                        if not candidates:
+                            return None
+                        src = candidates[0]
+                    shutil.move(src, target_path)
+                    return target_path
+                except Exception as exc:
+                    if "429" in str(exc) and attempt < retries - 1:
+                        wait_time = 15 * (attempt + 1)
+                        print(
+                            f"[LeaderboardCrawler] Rate limited (429) downloading {episode_id}. Waiting {wait_time}s...",
+                            file=sys.stderr,
+                        )
+                        import time
+
+                        time.sleep(wait_time)
+                    else:
+                        print(
+                            f"[LeaderboardCrawler] Error downloading replay {episode_id}: {exc}",
+                            file=sys.stderr,
+                        )
+                        return None
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             cwd_file = f"episode-{episode_id}-replay.json"
@@ -170,6 +185,7 @@ class LeaderboardCrawler:
                     os.remove(cwd_file)
                 except OSError:
                     pass
+        return None
 
     def parse_episode_trajectory(self, replay_path: str) -> dict[str, Any] | None:
         """Dissect a full 720-step replay file into player strategy metrics."""

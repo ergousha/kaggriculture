@@ -10,6 +10,8 @@ import os
 import tempfile
 from typing import Any
 
+import numpy as np
+
 try:
     import gymnasium as gym
     from gymnasium import spaces
@@ -59,7 +61,7 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
                 low=-1.0,
                 high=1.0,
                 shape=(self.strategy_space.dim,),
-                dtype=float,
+                dtype=np.float32,
             )
 
             # Observation space: basic game state metrics
@@ -67,7 +69,7 @@ class KaggricultureGymEnv(_BaseEnv):  # type: ignore[misc]
                 low=0.0,
                 high=1e6,
                 shape=(8,),
-                dtype=float,
+                dtype=np.float32,
             )
         else:
             self.action_space = None

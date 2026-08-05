@@ -137,7 +137,7 @@ def check_static() -> list[str]:
         fails.append(f"disallowed imports: {bad} (allowed: {sorted(ALLOWED_IMPORTS)})")
 
     # Entrypoint: name, arity, and — critically — position.
-    funcs = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
     classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
     agent_def = next((n for n in funcs if n.name == "agent"), None)
     if agent_def is None:
@@ -154,7 +154,7 @@ def check_static() -> list[str]:
         # agent and every turn raises.
         last_callable = None
         for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 last_callable = node.name
         if last_callable != "agent":
             fails.append(

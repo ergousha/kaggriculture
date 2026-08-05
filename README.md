@@ -28,11 +28,11 @@ python3 -m venv .venv
 ## Quick start
 
 ```bash
-.venv/bin/python probe_agent.py                                    # confirm the schema
-.venv/bin/python leaderboard_crawler.py --limit 10                 # stream & dissect top leaderboard replays
-.venv/bin/python local_arena.py --agent main.py --opponent baseline --episodes 30
-.venv/bin/python local_arena.py --agent main.py --opponent opponents/adaptive.py --episodes 30
-.venv/bin/python submit.py --dry-run
+uv run python probe_agent.py                                    # confirm the schema
+uv run python leaderboard_crawler.py --limit 10                 # stream & dissect top leaderboard replays
+uv run python local_arena.py --agent main.py --opponent baseline --episodes 30
+uv run python local_arena.py --agent main.py --opponent opponents/adaptive.py --episodes 30
+uv run python submit.py --dry-run
 ```
 
 ---
@@ -212,13 +212,6 @@ its docstring so nobody mistakes it for a live input.
 - **Tail risk.** Mean vs `baseline` is $22.5k but the minimum over 40 seeds is $2,244
   — one seed collapses. Not diagnosed. Median ($22,907) is a better guide to typical
   play than mean, and the `adaptive` matchup is far tighter (min $18,342, sd $1,584).
-- **Shed overflow: 324 items** lost over 40 episodes (~8/episode) — the sell cadence
-  does not fully keep up with harvest peaks.
-- **~2,000 no-op `PICKUP`s** (0.86% of actions): the ferry/provision pre-passes and
-  idle-unit logistics sometimes send several units for the same last item.
-- Tomato and strawberry are never planted, and carrot was removed as a filler. All
-  three are dominated on the numbers above, but the tomato/strawberry exclusion is
-  reasoned rather than A/B'd.
 - `ANIMAL_CARE` remains statistically unresolved against the scripted opponents
   (+0.5%/+2.9%, both n.s.), though self-play showed **+31.0% (p~0.021)**. Kept ON:
   the direct-call measurement (26 vs 12 eggs per goose over 16 days) is unambiguous.
@@ -231,20 +224,20 @@ its docstring so nobody mistakes it for a live input.
 
 ```bash
 # metrics + decision logs
-python local_arena.py --agent main.py --opponent baseline --episodes 30 --log-decisions
+uv run python local_arena.py --agent main.py --opponent baseline --episodes 30 --log-decisions
 
 # graduate a PLACEHOLDER: paired-seed A/B with a significance check
-python local_arena.py --agent main.py --opponent baseline --episodes 30 --ablate EXPAND_LAND
+uv run python local_arena.py --agent main.py --opponent baseline --episodes 30 --ablate EXPAND_LAND
 
 # sweep a numeric constant
-python local_arena.py --agent main.py --opponent baseline --episodes 30 --sweep MAX_HANDS=13,16,20
+uv run python local_arena.py --agent main.py --opponent baseline --episodes 30 --sweep MAX_HANDS=13,16,20
 
 # self-play against a frozen snapshot
-python local_arena.py --agent main.py --opponent mirror --episodes 30
+uv run python local_arena.py --agent main.py --opponent mirror --episodes 30
 
 # save and inspect replays
-python local_arena.py --agent main.py --opponent baseline --episodes 3 --save-replays 3
-python local_arena.py --replay logs/match_run_0042.json
+uv run python local_arena.py --agent main.py --opponent baseline --episodes 3 --save-replays 3
+uv run python local_arena.py --replay logs/match_run_0042.json
 ```
 
 Reported per run: mean/median/min/max/sd final cash, win rate, crashes, timeouts,
@@ -295,14 +288,14 @@ A continuous intelligence crawler that mines Kaggle competition leaderboard matc
 - **Hall of Fame Integration**: Automatically ingests top-tier external matches into `EliteRecorder`.
 
 ```bash
-python leaderboard_crawler.py --limit 10              # Single scan of 10 matches
-python leaderboard_crawler.py --interval 600          # Poll continuously every 10 min
-python leaderboard_crawler.py --import-hall-of-fame   # Ingest top replays to EliteRecorder
+uv run python leaderboard_crawler.py --limit 10              # Single scan of 10 matches
+uv run python leaderboard_crawler.py --interval 600          # Poll continuously every 10 min
+uv run python leaderboard_crawler.py --import-hall-of-fame   # Ingest top replays to EliteRecorder
 ```
 
 ### Synergy: Leaderboard-Guided Gym & Sparring Replays (`opponents/leaderboard_replay.py`)
 
-Relying *only* on a crawler creates imitation dependence (copying current leaderboard flaws), while relying *only* on a local gym risks overfitting to synthetic opponents. 
+Relying *only* on a crawler creates imitation dependence (copying current leaderboard flaws), while relying *only* on a local gym risks overfitting to synthetic opponents.
 
 To solve this, we created the **Leaderboard-Guided Gym**:
 - **Replay Sparring Opponent**: `opponents/leaderboard_replay.py` loads downloaded 720-step JSON replays from top Kaggle leaderboard teams and replays their exact turn-by-turn actions.
@@ -311,10 +304,21 @@ To solve this, we created the **Leaderboard-Guided Gym**:
 
 ```bash
 # Spar directly against the latest downloaded Kaggle leaderboard replay!
-python local_arena.py --agent main.py --opponent leaderboard --episodes 10
+uv run python local_arena.py --agent main.py --opponent leaderboard --episodes 10
 
 # Spar against a specific downloaded episode replay JSON:
-python local_arena.py --agent main.py --opponent logs/leaderboard_replays/episode-90163724-replay.json --episodes 10
+uv run python local_arena.py --agent main.py --opponent logs/leaderboard_replays/episode-90163724-replay.json --episodes 10
+```
+
+### Agent Failure Analysis (`examine_agent.py`)
+
+A script to examine real Kaggle matches where a specific version of your agent failed (lost or errored) and download the replays for debugging.
+
+- **Automated Failure Detection**: Fetches your active matches based on the submission description (e.g., `v0.0.5`), isolates losses, and downloads the replays into a dedicated `logs/failures_<version>` folder.
+
+```bash
+uv run python examine_agent.py v0.0.5
+uv run python examine_agent.py v0.0.5 --limit 5
 ```
 
 ---
@@ -323,8 +327,8 @@ python local_arena.py --agent main.py --opponent logs/leaderboard_replays/episod
 
 ```bash
 cp kaggle_credentials.example.py kaggle_credentials.py   # then edit
-python submit.py --dry-run                               # all checks, no submission
-python submit.py                                         # check, submit, poll
+uv run python submit.py --dry-run                               # all checks, no submission
+uv run python submit.py                                         # check, submit, poll
 ```
 
 Pre-flight hard-fails on: a disallowed import in `main.py`; a missing/wrong-arity
