@@ -32,7 +32,7 @@ jobs:
       - name: Extract Agent Version
         id: get_version
         run: |
-          VERSION=$(uv run python -c "import re; m = re.search(r'^AGENT_VERSION\s*=\s*[\"\\\']([^\"\\\']+)[\"\\\']', open('main.py').read(), re.M); print(m.group(1) if m else '0.0.0')")
+          VERSION=$(grep -E "^AGENT_VERSION\s*=" main.py | sed -E "s/.*['\"]([^'\"]+)['\"].*/\1/")
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "Agent version extracted: v${VERSION}"
