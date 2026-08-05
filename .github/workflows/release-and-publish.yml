@@ -36,8 +36,17 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "Agent version extracted: v${VERSION}"
+          
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q "refs/tags/v${VERSION}"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${VERSION} already exists. Skipping release and publish."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v${VERSION} does not exist. Proceeding with release and publish."
+          fi
 
       - name: Create GitHub Release
+        if: steps.get_version.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
@@ -49,6 +58,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Submit Agent to Kaggle
+        if: steps.get_version.outputs.exists == 'false'
         run: |
           uv run python submit.py -m "Automated release v${{ steps.get_version.outputs.version }}"
         env:
