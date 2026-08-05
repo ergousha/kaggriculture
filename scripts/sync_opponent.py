@@ -4,9 +4,10 @@ import re
 import shutil
 import subprocess
 
+
 def main():
     try:
-        with open("main.py", "r") as f:
+        with open("main.py") as f:
             content = f.read()
     except FileNotFoundError:
         print("main.py not found. Skipping sync.")
@@ -28,13 +29,14 @@ def main():
         shutil.copy("main.py", target_file)
         subprocess.run(["git", "add", target_file], check=True)
     else:
-        with open(target_file, "r") as f:
+        with open(target_file) as f:
             target_content = f.read()
-        
+
         if content != target_content:
             print(f"Sync Opponent: Updating existing opponent file {target_file}")
             shutil.copy("main.py", target_file)
             subprocess.run(["git", "add", target_file], check=True)
+
 
 if __name__ == "__main__":
     main()
