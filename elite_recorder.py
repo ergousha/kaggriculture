@@ -256,20 +256,43 @@ class EliteRecorder:
         os.makedirs(tmp_dir, exist_ok=True)
         try:
             print(f"[EliteRecorder] Fetching Kaggle live replay for episode {ep_id}...")
-            api.competition_episode_replay(ep_id, path=tmp_dir)
-            expected_filename = f"episode-{ep_id}-replay.json"
-            rep_path = os.path.join(tmp_dir, expected_filename)
-            if not os.path.exists(rep_path):
-                files = [
-                    os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith(".json")
-                ]
-                if not files:
-                    print(
-                        f"[EliteRecorder] Replay file for episode {ep_id} not found after download.",
-                        file=sys.stderr,
-                    )
-                    return False
-                rep_path = files[0]
+
+            retries = 3
+            rep_path = None
+            for attempt in range(retries):
+                try:
+                    api.competition_episode_replay(ep_id, path=tmp_dir)
+                    expected_filename = f"episode-{ep_id}-replay.json"
+                    rep_path = os.path.join(tmp_dir, expected_filename)
+                    if not os.path.exists(rep_path):
+                        files = [
+                            os.path.join(tmp_dir, f)
+                            for f in os.listdir(tmp_dir)
+                            if f.endswith(".json")
+                        ]
+                        if not files:
+                            rep_path = None
+                        else:
+                            rep_path = files[0]
+                    if rep_path:
+                        break
+                except Exception as exc:
+                    if "429" in str(exc) and attempt < retries - 1:
+                        wait_time = 15 * (attempt + 1)
+                        print(
+                            f"[EliteRecorder] Rate limited (429) downloading {ep_id}. Waiting {wait_time}s...",
+                            file=sys.stderr,
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise exc
+
+            if not rep_path:
+                print(
+                    f"[EliteRecorder] Replay file for episode {ep_id} not found after download.",
+                    file=sys.stderr,
+                )
+                return False
 
             with open(rep_path) as f:
                 data = json.load(f)
@@ -300,7 +323,7 @@ class EliteRecorder:
                     p_state = (
                         step_states[player_index]
                         if (
-                            isinstance(step_states, (list, tuple))
+                            isinstance(step_states, list | tuple)
                             and player_index < len(step_states)
                         )
                         else {}
@@ -310,11 +333,11 @@ class EliteRecorder:
                     farms = (obs.get("farms") if isinstance(obs, dict) else []) or []
                     farm = (
                         farms[player_index]
-                        if (isinstance(farms, (list, tuple)) and player_index < len(farms))
+                        if (isinstance(farms, list | tuple) and player_index < len(farms))
                         else {}
                     )
                     hands_raw = farm.get("hands") if isinstance(farm, dict) else None
-                    hands_cnt = len(hands_raw) if isinstance(hands_raw, (list, tuple)) else 0
+                    hands_cnt = len(hands_raw) if isinstance(hands_raw, list | tuple) else 0
                     rec = {
                         "player": player_index,
                         "step": s_idx,
