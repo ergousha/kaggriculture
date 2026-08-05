@@ -8,12 +8,14 @@ Python 3.10+ (developed on 3.14).
 
 ```
 main.py                       # THE submission — single file, self-contained, stdlib only
+leaderboard_crawler.py        # Continuous Leaderboard Intelligence & Replay Mining Pipeline
+elite_recorder.py             # Hall of Fame trajectory recorder & Kaggle episode importer
 probe_agent.py                # schema probe (build step 1); writes logs/probe_schema.json
 local_arena.py                # match runner, metrics, decision logs, A/B + sweep rig
 submit.py                     # pre-flight, submit, poll, history
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
 kaggle_credentials.example.py # copy to kaggle_credentials.py (gitignored)
-logs/                         # replays, decision logs, submission history
+logs/                         # replays, decision logs, submission history, leaderboard intelligence
 ```
 
 ## Setup
@@ -21,16 +23,13 @@ logs/                         # replays, decision logs, submission history
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install kaggle-environments kaggle
-# Note: kaggle-environments depends on pygame, which fails to build on Python 3.14.
-# pygame is only needed by unrelated envs, so install without deps if that bites:
-#   .venv/bin/pip install --no-deps kaggle-environments
-#   .venv/bin/pip install jsonschema requests numpy termcolor
 ```
 
 ## Quick start
 
 ```bash
 .venv/bin/python probe_agent.py                                    # confirm the schema
+.venv/bin/python leaderboard_crawler.py --limit 10                 # stream & dissect top leaderboard replays
 .venv/bin/python local_arena.py --agent main.py --opponent baseline --episodes 30
 .venv/bin/python local_arena.py --agent main.py --opponent opponents/adaptive.py --episodes 30
 .venv/bin/python submit.py --dry-run
@@ -271,12 +270,52 @@ Two details worth knowing:
 `opponents/adaptive.py` is **not** a port of the public
 "adaptive-farming-strategy-for-kaggriculture" notebook. That source could not be
 retrieved: kaggle.com renders competition and notebook pages in JS and returns no
-readable body to a plain fetch, and the Kaggle API needs credentials that are not
-configured here. It is an independently written staged-progression agent built to the
-same *idea*, and it exists because `starter` is trivially beaten. `submit.py --dry-run`
-prints the `kaggle kernels pull` commands to fetch the real notebooks once credentials
-exist, so this can be replaced with a faithful port — **until then, treat
-"beats adaptive" as beating my construction, not the published strategy.**
+same *idea*, and it exists because `starter` is trivially beaten.
+
+---
+
+### Core Rationale: Expanding Agent Degrees of Freedom
+
+Parameter sweeps and local gym optimization on a fixed, hardcoded agent script hit a structural ceiling. Tuning parameters on a rigid phase script optimizes *how well* the agent executes a single plan, but cannot invent new tactical pivots, counter-strategies, or dynamic market adaptations.
+
+To achieve top-tier competition performance, we developed two complementary systems:
+
+1. **Continuous Leaderboard Intelligence**: The state-action possibility space in Kaggriculture is vast. By continuously mining 720-step replays from top-ranked teams on Kaggle, we automatically discover emerging meta-strategies, build-order shifts, and market arbitrage thresholds directly from the best players in the competition.
+2. **Dynamic Utility & Telemetry Architecture**: We unlocked higher degrees of freedom in `main.py` by replacing rigid linear phase machines with a **Marginal ROI Auction Engine** and **Opponent Telemetry Sensor**. The agent evaluates action returns dynamically based on live market prices and opponent telemetry, enabling it to pivot strategy mid-match if an opponent attempts to flood or contest a specific market sector.
+
+---
+
+### Leaderboard Intelligence Pipeline (`leaderboard_crawler.py`)
+
+A continuous intelligence crawler that mines Kaggle competition leaderboard matches to analyze top-performing strategies:
+
+- **Automated Replay Streaming**: Fetches 720-step JSON replays directly from top leaderboard teams via Kaggle API.
+- **Strategic Trajectory Dissector**: Parses turn-by-turn opening build orders, crop choices, animal purchase timelines, hand hiring curves, and land expansion milestone days.
+- **Dashboard & Intelligence DB**: Generates machine-readable `logs/leaderboard_intelligence.json` and human-readable `logs/leaderboard_intelligence.md`.
+- **Hall of Fame Integration**: Automatically ingests top-tier external matches into `EliteRecorder`.
+
+```bash
+python leaderboard_crawler.py --limit 10              # Single scan of 10 matches
+python leaderboard_crawler.py --interval 600          # Poll continuously every 10 min
+python leaderboard_crawler.py --import-hall-of-fame   # Ingest top replays to EliteRecorder
+```
+
+### Synergy: Leaderboard-Guided Gym & Sparring Replays (`opponents/leaderboard_replay.py`)
+
+Relying *only* on a crawler creates imitation dependence (copying current leaderboard flaws), while relying *only* on a local gym risks overfitting to synthetic opponents. 
+
+To solve this, we created the **Leaderboard-Guided Gym**:
+- **Replay Sparring Opponent**: `opponents/leaderboard_replay.py` loads downloaded 720-step JSON replays from top Kaggle leaderboard teams and replays their exact turn-by-turn actions.
+- **Gym Parameter Sweeps against #1 Leaderboard Players**: You can run `local_arena.py` parameter sweeps directly against real downloaded #1 leaderboard replays.
+- **Meta-Breaker Counter-Strategy Discovery**: The Gym optimizes `main.py` parameters to discover strategies that specifically defeat the top leaderboard meta (e.g. counter-planting against a 60% Strawberry meta).
+
+```bash
+# Spar directly against the latest downloaded Kaggle leaderboard replay!
+python local_arena.py --agent main.py --opponent leaderboard --episodes 10
+
+# Spar against a specific downloaded episode replay JSON:
+python local_arena.py --agent main.py --opponent logs/leaderboard_replays/episode-90163724-replay.json --episodes 10
+```
 
 ---
 

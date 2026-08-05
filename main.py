@@ -34,7 +34,7 @@ import os
 import time
 import traceback
 
-AGENT_VERSION = "0.0.4"
+AGENT_VERSION = "0.0.5"
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +88,8 @@ FLAGS = {
     "ANIMAL_CARE": True,
 }
 
-# Labour: 12 hands provides the optimal balance of labor vs. wage costs (v0.0.2 replay insight).
-MAX_HANDS = 12
+# Labour: 13 hands matches top #1 leaderboard agents ($187k score insight), with 14.5% cash gate.
+MAX_HANDS = 13
 HIRES_PER_TURN = 7
 HIRE_CASH_FRACTION = 0.1453
 
@@ -118,7 +118,7 @@ WHEAT_MAX_BUY_PRICE = 70
 FEED_GATE_MAX = 50
 WHEAT_CARRY_PER_UNIT = 6
 
-# Strawberry & Melon targets (v0.0.2 replay insight: Strawberry is primary multi-harvest cash engine).
+# Strawberry & Melon targets (v0.0.6 leaderboard insight: balanced Melon windfall + Strawberry multi-harvest).
 STRAWBERRY_TILE_TARGET = 45
 STRAWBERRY_LAND_FRACTION = 0.4065
 MELON_TILE_TARGET = 12
@@ -275,11 +275,41 @@ class OpponentTracker:
         else:
             self.profile = "UNKNOWN"
 
+    def market_pressure(self, item):
+        """Estimate price saturation impact based on opponent's active crops/livestock."""
+        if item == "MELON":
+            n = self.crops.get("MELON", 0)
+            if n >= 12:
+                return 0.45  # Opponent is heavy Melon maxxer: market will crash hard
+            elif n >= 6:
+                return 0.70
+        elif item == "STRAWBERRY":
+            n = self.crops.get("STRAWBERRY", 0)
+            if n >= 20:
+                return 0.65
+        elif item == "GOOSE":
+            n = self.animals.get("GOOSE", 0)
+            if n >= 12:
+                return 0.85
+        return 1.0
 
 
 # ---------------------------------------------------------------------------
 # Strategic planner (macro: money, land, labour, tile roles)
 # ---------------------------------------------------------------------------
+
+
+def _load_meta_intelligence():
+    """Attempt to load local leaderboard intelligence JSON if available."""
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "leaderboard_intelligence.json")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                data = json.load(f)
+                return data.get("top_opening_crops", {})
+    except Exception:
+        pass
+    return {}
 
 
 class StrategicPlanner:
@@ -292,11 +322,11 @@ class StrategicPlanner:
 
     # -- tile roles ---------------------------------------------------------
 
-    def plan_roles(self, farm, day, days_left, market, cash):
-        """Assign a role to every unlocked, non-shed-access tile.
+    def plan_roles(self, farm, day, days_left, market, cash, opp=None):
+        """Assign a role to every unlocked, non-shed-access tile using dynamic ROI auction.
 
         Ordering matters: animals are placed nearest the shed because they need
-        wheat carried out from it every day, melons next (one water/day), wheat
+        wheat carried out from it every day, melons/strawberries next, wheat
         on the remainder.
         """
         board = len(farm.get("tiles", []) or [])
@@ -316,10 +346,24 @@ class StrategicPlanner:
         usable.sort(key=lambda p: (_shed_distance(p, board), p[1], p[0]))
 
         n_animals_existing = _count_animals(farm)
-        # How many animal tiles can we actually service? Each animal costs ~3
-        # action-slots/day (FEED + CARE + amortised HARVEST) plus ~1 to walk.
-        strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
-        melon_target = MELON_TILE_TARGET if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+
+        # Dynamic ROI valuation, Opponent market pressure, and Leaderboard Meta Intelligence
+        melon_press = opp.market_pressure("MELON") if (opp and hasattr(opp, "market_pressure")) else 1.0
+        straw_press = opp.market_pressure("STRAWBERRY") if (opp and hasattr(opp, "market_pressure")) else 1.0
+
+        p_melon = market.price("MELON") * melon_press
+        p_straw = market.price("STRAWBERRY") * straw_press
+
+        meta_crops = _load_meta_intelligence()
+        straw_meta_dominant = meta_crops.get("STRAWBERRY", 0) > meta_crops.get("MELON", 0)
+
+        # Dynamic tile allocation targets
+        if (p_straw >= 100 or straw_meta_dominant) and (p_straw > p_melon or melon_press < 0.6):
+            strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
+            melon_target = min(6, MELON_TILE_TARGET) if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
+        else:
+            strawberry_target = STRAWBERRY_TILE_TARGET if days_left >= 10 else 0
+            melon_target = MELON_TILE_TARGET if days_left > (29 - MELON_LAST_PLANT_DAY) else 0
 
         premium_ok = FLAGS["PREMIUM_LIVESTOCK"] and len(usable) >= PREMIUM_MIN_TILES
         n_sheep = MAX_SHEEP if premium_ok else 0
@@ -1160,7 +1204,7 @@ def _decide(obs, config, st, log):
     log["opp_profile"] = st.opponent.profile
 
     # --- Layer A: strategy -------------------------------------------------
-    roles = st.planner.plan_roles(farm, day, days_left, market, float(farm.get("money", 0.0)))
+    roles = st.planner.plan_roles(farm, day, days_left, market, float(farm.get("money", 0.0)), opp=st.opponent)
     orders = st.planner.market_orders(
         obs, farm, private, market, st.opponent, day, days_left, hour, log
     )

@@ -83,6 +83,13 @@ def resolve_opponent(name: str, agent_path: str, workdir: str) -> str:
         if not os.path.exists(p):
             raise SystemExit(f"adaptive opponent missing at {p}")
         return p
+    if name in ("leaderboard", "replay") or name.endswith(".json"):
+        if name.endswith(".json") and os.path.exists(name):
+            os.environ["KAGGRICULTURE_REPLAY_PATH"] = os.path.abspath(name)
+        p = os.path.join(HERE, "opponents", "leaderboard_replay.py")
+        if not os.path.exists(p):
+            raise SystemExit(f"leaderboard_replay opponent missing at {p}")
+        return p
     if name == "mirror":
         snap = os.path.join(workdir, "mirror_snapshot.py")
         shutil.copyfile(agent_path, snap)
