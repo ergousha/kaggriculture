@@ -282,12 +282,12 @@ Each `farm` dict (public, visible to both players):
 
 ```py
 {
-  "money":              float,
-  "tiles":              [[tile, ...], ...],   # tiles[y][x]
-  "farmer":             [x, y],
-  "hands":              [[x, y], ...],         # hired hands for the current day
-  "unlocked_quadrants": ["NW", ...],          # subset of {"NW","NE","SW","SE"}
-  "hires_today":        int,                  # used to price the next HIRE
+    "money": float,
+    "tiles": [[tile, ...], ...],  # tiles[y][x]
+    "farmer": [x, y],
+    "hands": [[x, y], ...],  # hired hands for the current day
+    "unlocked_quadrants": ["NW", ...],  # subset of {"NW","NE","SW","SE"}
+    "hires_today": int,  # used to price the next HIRE
 }
 ```
 
@@ -298,29 +298,29 @@ A `tile` is one of:
 - a plant dict:
   ```py
   {
-    "kind":                 "PLANT",
-    "crop":                 "WHEAT" | "CARROT" | "TOMATO" | "STRAWBERRY" | "MELON",
-    "planted_day":          int,
-    "watered_today":        bool,   # reset to False each end-of-day
-    "consecutive_unwatered": int,   # 2+ → tile turns to a weed
-    "yield_units":          int,    # units currently harvestable
-    "max_lifespan_step":    int,    # step at which decay begins; -1 for ongoing crops
-    "fertilized_until_day": int,    # last day fertilizer bonus applies; -1 if none
+      "kind": "PLANT",
+      "crop": "WHEAT" | "CARROT" | "TOMATO" | "STRAWBERRY" | "MELON",
+      "planted_day": int,
+      "watered_today": bool,  # reset to False each end-of-day
+      "consecutive_unwatered": int,  # 2+ → tile turns to a weed
+      "yield_units": int,  # units currently harvestable
+      "max_lifespan_step": int,  # step at which decay begins; -1 for ongoing crops
+      "fertilized_until_day": int,  # last day fertilizer bonus applies; -1 if none
   }
   ```
 - a weed dict: `{"kind": "WEED"}`
 - an animal structure dict (coop/pasture, optionally occupied):
   ```py
   {
-    "kind":                 "COOP" | "PASTURE",
-    "animal":               "GOOSE" | "COW" | "SHEEP" | None,  # None until PLACEd
-    "placed_day":           int,
-    "yield_units":          int,
-    "fed_today":            bool,
-    "consecutive_unfed":    int,    # 2+ → animal escapes
-    "cared_today":          bool,
-    "fertilizer_available": bool,   # set at end-of-day for every surviving animal; cleared by COLLECT_FERTILIZER
-    "pending_care_bonus":   int,    # banked CARE bonus, applied on the next yield tick
+      "kind": "COOP" | "PASTURE",
+      "animal": "GOOSE" | "COW" | "SHEEP" | None,  # None until PLACEd
+      "placed_day": int,
+      "yield_units": int,
+      "fed_today": bool,
+      "consecutive_unfed": int,  # 2+ → animal escapes
+      "cared_today": bool,
+      "fertilizer_available": bool,  # set at end-of-day for every surviving animal; cleared by COLLECT_FERTILIZER
+      "pending_care_bonus": int,  # banked CARE bonus, applied on the next yield tick
   }
   ```
 

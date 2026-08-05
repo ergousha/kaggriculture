@@ -127,6 +127,7 @@ env.render(mode="ipython", width=1200, height=800)
 
 # Or dump a replay JSON for the visualizer / offline analysis
 import json
+
 with open("replay.json", "w") as f:
     json.dump(env.toJSON(), f)
 ```
