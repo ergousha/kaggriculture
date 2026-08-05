@@ -21,9 +21,9 @@ def _plain(obj, depth=0):
         return "<max-depth>"
     if isinstance(obj, dict):
         return {str(k): _plain(v, depth + 1) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list | tuple):
         return [_plain(v, depth + 1) for v in obj]
-    if isinstance(obj, (str, int, float, bool)) or obj is None:
+    if isinstance(obj, str | int | float | bool) or obj is None:
         return obj
     return repr(obj)
 
