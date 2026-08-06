@@ -3,6 +3,7 @@ kaggle_credentials.py
 
 # Match replays, decision logs, submission history
 logs/
+replays/
 
 # Local environment
 .venv/
@@ -12,3 +13,6 @@ __pycache__/
 
 # Notebooks pulled for reference
 reference/
+
+# Offline RL Weights
+bc_weights.npz

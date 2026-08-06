@@ -209,6 +209,40 @@ its docstring so nobody mistakes it for a live input.
 
 ---
 
+## Large-Scale Offline Reinforcement Learning Pipeline
+
+Based on ideas from *AlphaStar Unplugged*, we have a full-featured data collection and Offline RL pipeline. The system uses a **Hybrid Agent** architecture: a neural network dictates macro-strategy (e.g., target hand counts, expansion timing) trained on Kaggle replays, while the heuristic `SpatialScheduler` executes it.
+
+To comply with the strict Kaggle environment submission constraints (100 MiB limit, stdlib+numpy only), the pipeline exports PyTorch weights to a lightweight `.npz` file for pure-numpy inference in `main.py`.
+
+### 1. Massive Data Collection
+We now leverage the massive **Meta Kaggle** dataset to bypass rate limits and scrape thousands of elite replays instantly. The `dataset_builder.py` automatically downloads `Competitions.csv` and `Episodes.csv` and extracts the top Kaggle matches:
+(No manual crawler command needed; it runs automatically during dataset generation)
+
+### 2. Dataset Generation
+Convert raw JSON replays into PyTorch/JAX-ready `.npz` tensors (Vectors + Spatial Grids):
+```bash
+uv run python -m rl.dataset_builder
+```
+
+### 3. Behavior Cloning Training
+Train the neural macro-strategy policy on the elite dataset:
+```bash
+uv run python -m rl.train_offline --epochs 10
+```
+
+### 4. Numpy Export & Integration
+Export the trained PyTorch weights to a lightweight `.npz` format:
+```bash
+uv run python -m rl.export_to_numpy
+```
+
+Finally, distill and inject the neural network payload into `main.py` using Base64 embedding:
+```bash
+uv run python -m rl.distill_to_main
+```
+
+---
 ## Local arena
 
 ```bash
@@ -267,20 +301,9 @@ To achieve top-tier competition performance, we developed two complementary syst
 
 ---
 
-### Leaderboard Intelligence Pipeline (`leaderboard_crawler.py`)
+### Leaderboard Intelligence Pipeline (Meta Kaggle)
 
-A continuous intelligence crawler that mines Kaggle competition leaderboard matches to analyze top-performing strategies:
-
-- **Automated Replay Streaming**: Fetches 720-step JSON replays directly from top leaderboard teams via Kaggle API.
-- **Strategic Trajectory Dissector**: Parses turn-by-turn opening build orders, crop choices, animal purchase timelines, hand hiring curves, and land expansion milestone days.
-- **Dashboard & Intelligence DB**: Generates machine-readable `logs/leaderboard_intelligence.json` and human-readable `logs/leaderboard_intelligence.md`.
-- **Hall of Fame Integration**: Automatically ingests top-tier external matches into `EliteRecorder`.
-
-```bash
-uv run python leaderboard_crawler.py --limit 10              # Single scan of 10 matches
-uv run python leaderboard_crawler.py --interval 600          # Poll continuously every 10 min
-uv run python leaderboard_crawler.py --import-hall-of-fame   # Ingest top replays to EliteRecorder
-```
+Our continuous intelligence pipeline now runs exclusively via the **Meta Kaggle** public dataset. By scanning `Episodes.csv`, we isolate and download 720-step JSON replays directly from top leaderboard teams, allowing us to build an offline dataset of emerging meta-strategies, build-order shifts, and market arbitrage thresholds without hitting API rate limits.
 
 ### Synergy: Leaderboard-Guided Gym & Sparring Replays (`opponents/leaderboard_replay.py`)
 

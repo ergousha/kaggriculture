@@ -53,6 +53,8 @@ ALLOWED_IMPORTS = {
     "copy",
     "sys",
     "numpy",
+    "base64",
+    "io",
 }
 
 
