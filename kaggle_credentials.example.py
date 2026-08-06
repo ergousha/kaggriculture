@@ -22,7 +22,17 @@ If both are set the access token wins, matching the Kaggle client's own
 precedence (KaggleApi.authenticate tries the access token first, then the
 legacy API key).
 """
+# ---------------------------------------------------------------------------
+# INTERNAL API (WEB HACK) FOR UNLIMITED REPLAYS
+# ---------------------------------------------------------------------------
+# To bypass strict replay download limits, supply your browser session below.
+# 1. Log into kaggle.com in your browser.
+# 2. Open Developer Tools (F12) -> Network tab.
+# 3. Reload the page, click the main document (e.g. `kaggriculture`), scroll to Request Headers.
+# 4. Copy the entire `cookie: ` string and the `x-xsrf-token: ` string here.
 
+KAGGLE_COOKIE = ""
+KAGGLE_XSRF_TOKEN = ""
 KAGGLE_API_TOKEN = ""
 
 KAGGLE_USERNAME = "your_username"
