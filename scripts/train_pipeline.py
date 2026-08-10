@@ -56,7 +56,9 @@ def main():
 
         # Parse
         print("Parsing JSON replays into ML dataset...")
-        run_cmd(f"uv run python -m rl.dataset_builder --replay-dir {REPLAYS_DIR} --output {chunk_file}")
+        run_cmd(
+            f"uv run python -m rl.dataset_builder --replay-dir {REPLAYS_DIR} --output {chunk_file}"
+        )
 
         # Cleanup
         print("Cleaning up raw JSON files...")
@@ -69,13 +71,7 @@ def main():
         print("No dataset chunks found! Aborting.")
         sys.exit(1)
 
-    all_data = {
-        "planes": [],
-        "globals": [],
-        "farmer_acts": [],
-        "hands_acts": [],
-        "market_acts": []
-    }
+    all_data = {"planes": [], "globals": [], "farmer_acts": [], "hands_acts": [], "market_acts": []}
 
     for f in sorted(chunk_files):
         print(f"Loading {f}...")

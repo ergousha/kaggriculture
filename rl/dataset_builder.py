@@ -139,7 +139,9 @@ def parse_replay(
     )
 
 
-def parse_online_replay(replay_path: str, target_p: int = 0) -> tuple[float, float, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None:
+def parse_online_replay(
+    replay_path: str, target_p: int = 0
+) -> tuple[float, float, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None:
     """Parse a single replay for Online RL, returning (me_cash, opp_cash, arrays)."""
     try:
         with open(replay_path) as f:
@@ -229,6 +231,8 @@ def parse_online_replay(replay_path: str, target_p: int = 0) -> tuple[float, flo
         np.stack(market_acts),
     )
     return me_cash, opp_cash, arrays
+
+
 def build_dataset_worker(args):
     return parse_replay(*args)
 

@@ -77,9 +77,11 @@ def train_offline_bc(dataset_path: str, epochs: int = 5, batch_size: int = 256):
 
             # Market loss (BCE for buy/sell flags, MSE for log qty)
             loss_m_flags = bce_loss(m_preds[..., :2], batch_m[..., :2])
-            active_m_mask = (batch_m[..., 2] > 0)
+            active_m_mask = batch_m[..., 2] > 0
             if active_m_mask.any():
-                loss_m_qty = mse_loss(m_preds[..., 2][active_m_mask], batch_m[..., 2][active_m_mask])
+                loss_m_qty = mse_loss(
+                    m_preds[..., 2][active_m_mask], batch_m[..., 2][active_m_mask]
+                )
             else:
                 loss_m_qty = torch.tensor(0.0, device=device)
             loss_m = loss_m_flags + loss_m_qty
