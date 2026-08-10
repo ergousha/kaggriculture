@@ -1,9 +1,13 @@
-"""Neural Architecture for Kaggriculture Offline RL.
+"""Neural Architecture for Kaggriculture Full RL.
 
 Defines the multi-modal Observation Encoder (Vectors + Spatial Grids)
-and the Macro-Action Decoder for the Hybrid Strategy Policy.
+and three distinct atomic action decoders:
+1. FarmerHead (Categorical)
+2. HandsSpatialHead (10x10 Spatial Categorical)
+3. MarketHead (Multi-discrete transactions)
 """
 
+import torch
 import torch.nn as nn
 
 
@@ -33,29 +37,71 @@ class ObservationEncoder(nn.Module):
         v_emb = self.vector_mlp(vector_obs)
         s_emb = self.spatial_cnn(spatial_obs)
         s_emb = self.spatial_proj(s_emb)
-        # Combine embeddings (additive fusion)
         return v_emb + s_emb
 
 
-class MacroActionDecoder(nn.Module):
-    def __init__(self, d_model=128, num_macro_actions=2):
+class FarmerHead(nn.Module):
+    def __init__(self, d_model=128, num_actions=20):
         super().__init__()
-        # Outputs logits for [did_hire, did_buy_land]
-        self.macro_head = nn.Sequential(
-            nn.Linear(d_model, 64), nn.ReLU(), nn.Linear(64, num_macro_actions)
+        self.net = nn.Sequential(nn.Linear(d_model, 64), nn.ReLU(), nn.Linear(64, num_actions))
+
+    def forward(self, state_emb):
+        return self.net(state_emb)
+
+
+class HandsSpatialHead(nn.Module):
+    def __init__(self, vector_dim=4, spatial_channels=5, num_actions=18):
+        super().__init__()
+        # We concatenate broadcasted vector features to the spatial grid
+        in_channels = spatial_channels + vector_dim
+        self.conv_net = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, num_actions, kernel_size=1),  # (B, num_actions, 10, 10)
+        )
+
+    def forward(self, vector_obs, spatial_obs):
+        B, _, H, W = spatial_obs.shape
+        # Broadcast vector obs
+        v_grid = vector_obs.view(B, -1, 1, 1).expand(-1, -1, H, W)
+        x = torch.cat([spatial_obs, v_grid], dim=1)
+        return self.conv_net(x)
+
+
+class MarketHead(nn.Module):
+    def __init__(self, d_model=128, num_items=12):
+        super().__init__()
+        self.num_items = num_items
+        self.net = nn.Sequential(
+            nn.Linear(d_model, 128),
+            nn.ReLU(),
+            nn.Linear(128, num_items * 3),  # 3 channels: [buy, sell, log_qty]
         )
 
     def forward(self, state_emb):
-        # We output raw logits for BCEWithLogitsLoss during training
-        return self.macro_head(state_emb)
+        out = self.net(state_emb)
+        return out.view(-1, self.num_items, 3)
 
 
-class KaggriculturePolicy(nn.Module):
-    def __init__(self):
+class KaggriculturePolicyFullRL(nn.Module):
+    def __init__(self, num_farmer_acts=20, num_hand_acts=18, num_market_items=12):
         super().__init__()
         self.encoder = ObservationEncoder()
-        self.decoder = MacroActionDecoder()
+
+        self.farmer_head = FarmerHead(num_actions=num_farmer_acts)
+        self.hands_head = HandsSpatialHead(num_actions=num_hand_acts)
+        self.market_head = MarketHead(num_items=num_market_items)
 
     def forward(self, vector_obs, spatial_obs):
+        # Global state for Farmer and Market
         state_emb = self.encoder(vector_obs, spatial_obs)
-        return self.decoder(state_emb)
+
+        farmer_logits = self.farmer_head(state_emb)
+        market_preds = self.market_head(state_emb)
+
+        # Spatial grid for Hands
+        hands_logits = self.hands_head(vector_obs, spatial_obs)
+
+        return farmer_logits, hands_logits, market_preds
