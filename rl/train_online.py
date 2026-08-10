@@ -56,11 +56,13 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
     else:
         print("Warning: No base model found! Training from scratch.")
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-5) # Lower LR for finetuning
+    optimizer = optim.Adam(model.parameters(), lr=1e-5)  # Lower LR for finetuning
 
     # We do NOT use reduction="mean" because we will multiply the raw losses by Advantage!
     ce_loss = nn.CrossEntropyLoss(reduction="none")
-    bce_loss = nn.BCEWithLogitsLoss(reduction="none", pos_weight=torch.tensor([50.0, 50.0]).to(device))
+    bce_loss = nn.BCEWithLogitsLoss(
+        reduction="none", pos_weight=torch.tensor([50.0, 50.0]).to(device)
+    )
     mse_loss = nn.MSELoss(reduction="none")
 
     for iter_idx in range(1, iterations + 1):
@@ -99,7 +101,9 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
         mean_cash = cash_array.mean()
         std_cash = cash_array.std() + 1e-8
         advantages = (cash_array - mean_cash) / std_cash
-        print(f"Iteration Cash - Mean: ${mean_cash:.2f}, Std: {std_cash:.2f}, Max: ${cash_array.max():.2f}")
+        print(
+            f"Iteration Cash - Mean: ${mean_cash:.2f}, Std: {std_cash:.2f}, Max: ${cash_array.max():.2f}"
+        )
 
         # Update Model
         model.train()
@@ -131,7 +135,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
             loss_m_flags = bce_loss(m_preds[..., :2], m_acts_t[..., :2]).mean(dim=(1, 2))
 
             # MSE loss only for active market actions
-            active_m_mask = (m_acts_t[..., 2] > 0)
+            active_m_mask = m_acts_t[..., 2] > 0
             loss_m_qty = torch.zeros_like(loss_m_flags)
             if active_m_mask.any():
                 # This is tricky because we need it per-step.
@@ -158,7 +162,9 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
 
             # Market BCE Entropy
             p_m = torch.sigmoid(m_preds[..., :2])
-            entropy_m = (-p_m * torch.log(p_m + 1e-8) - (1 - p_m) * torch.log(1 - p_m + 1e-8)).mean()
+            entropy_m = (
+                -p_m * torch.log(p_m + 1e-8) - (1 - p_m) * torch.log(1 - p_m + 1e-8)
+            ).mean()
 
             total_entropy = entropy_f + entropy_h + entropy_m
             pg_loss = pg_loss - (entropy_coef * total_entropy)
@@ -176,13 +182,16 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
         # Save model and rebuild main.py
         torch.save(model.state_dict(), model_path)
         print("Rebuilding main.py with new weights...")
-        subprocess.run("uv run python scripts/build_submission.py", shell=True, check=True, cwd=PROJECT_ROOT)
+        subprocess.run(
+            "uv run python scripts/build_submission.py", shell=True, check=True, cwd=PROJECT_ROOT
+        )
 
     print("\nOnline RL Training Complete!")
 
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--episodes", type=int, default=20)
