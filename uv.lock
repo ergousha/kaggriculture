@@ -1360,7 +1360,7 @@ wheels = [
 
 [[package]]
 name = "kaggle-environments"
-version = "1.32.4"
+version = "1.32.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "flask" },
@@ -1383,9 +1383,9 @@ dependencies = [
     { name = "termcolor" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/69/d8/9f89cc9daf76434b245e964dfa79b7c57a8a41b5a050f202933ecbbac169/kaggle_environments-1.32.4.tar.gz", hash = "sha256:beaca2718db5dadb69b2035059c1682fd98943c52eb5ff81eb8841c5e54b72b5", size = 59873402, upload-time = "2026-08-04T19:08:50.583Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/a5/2f72c81ef5b577d954f534fe51f089005c342d05022faafaba9ccb45b314/kaggle_environments-1.32.6.tar.gz", hash = "sha256:0221b66ef8023c83aa065e16cc42c5b050f04bc5d0d6711208588072ea6248bc", size = 59875672, upload-time = "2026-08-07T17:20:24.086Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/5d/2536eadcbf952c7e0a0571e78fb79cd69843ae52fd8160dc9e5591a4adcf/kaggle_environments-1.32.4-py3-none-any.whl", hash = "sha256:0b0fded2045e3d29ac30e1136ed6a75446e64393f2283142b0b751fdf38af096", size = 60674568, upload-time = "2026-08-04T19:08:46.857Z" },
+    { url = "https://files.pythonhosted.org/packages/92/e2/74658416d8aef6bcf9789d0652f4d12d55c9af10ead3e2912bffc737fc31/kaggle_environments-1.32.6-py3-none-any.whl", hash = "sha256:e70a7d7765b16deb1fcfa00532eb5197f28bc9fbfa07a0eee150a17d67bd77ab", size = 60677343, upload-time = "2026-08-07T17:20:19.634Z" },
 ]
 
 [[package]]
@@ -1423,7 +1423,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "kaggle", specifier = ">=1.6.14" },
-    { name = "kaggle-environments", specifier = ">=1.14.11" },
+    { name = "kaggle-environments", specifier = ">=1.32.6" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "torch", specifier = ">=2.13.0" },
 ]
