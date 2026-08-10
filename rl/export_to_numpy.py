@@ -10,13 +10,13 @@ import os
 import numpy as np
 import torch
 
-from rl.architecture import KaggriculturePolicy
+from rl.architecture import KaggriculturePolicyFullRL
 
 
 def export_weights_to_numpy(model_path: str, output_path: str):
     print(f"Loading PyTorch model from {model_path}...")
 
-    model = KaggriculturePolicy()
+    model = KaggriculturePolicyFullRL()
 
     try:
         model.load_state_dict(torch.load(model_path, map_location="cpu"))
@@ -34,7 +34,7 @@ def export_weights_to_numpy(model_path: str, output_path: str):
 
     if os.path.dirname(output_path):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    np.savez_compressed(output_path, **np_weights)
+    np.savez_compressed(output_path, **np_weights)  # type: ignore
     print(f"Exported {len(np_weights)} parameter tensors to {output_path}")
     print(f"File size: {os.path.getsize(output_path) / 1024:.2f} KB (well within 100 MiB limit)")
 
@@ -44,7 +44,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="logs/bc_model.pt")
-    parser.add_argument("--output", default="bc_weights.npz")
+    parser.add_argument("--output", default="logs/bc_weights.npz")
     args = parser.parse_args()
 
     export_weights_to_numpy(args.model, args.output)
