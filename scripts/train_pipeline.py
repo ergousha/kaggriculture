@@ -50,7 +50,7 @@ def main():
         try:
             # We use --unzip directly
             run_cmd(f"uv run kaggle datasets download -d {slug} -p {REPLAYS_DIR} --unzip")
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             print(f"Warning: Failed to download {slug}. It may not exist. Skipping.")
             continue
 
@@ -100,11 +100,11 @@ def main():
 
     # 3. Train
     print("\n--- Training Model ---")
-    run_cmd(f"uv run python -m rl.train_offline --epochs 10")
-    
+    run_cmd("uv run python -m rl.train_offline --epochs 10")
+
     # 4. Export and build submission
     print("\n--- Building Submission ---")
-    run_cmd(f"uv run python scripts/build_submission.py")
+    run_cmd("uv run python scripts/build_submission.py")
 
     print("\nPipeline Complete!")
 

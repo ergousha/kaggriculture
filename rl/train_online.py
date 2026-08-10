@@ -1,15 +1,14 @@
 import glob
 import os
 import subprocess
-import time
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from rl.dataset_builder import parse_online_replay
 from rl.architecture import KaggriculturePolicyFullRL
+from rl.dataset_builder import parse_online_replay
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
@@ -70,7 +69,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
         if not replays:
             print("Error: No replays found after rollouts.")
             continue
-        
+
         # Parse replays and collect advantages
         parsed_data = []
         cash_list = []
@@ -90,7 +89,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
                 me_cash, opp_cash, arrays = parsed
                 parsed_data.append(arrays)
                 cash_list.append(me_cash)
-        
+
         if not parsed_data:
             print("No valid trajectories parsed.")
             continue
@@ -109,7 +108,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
         for traj_idx, arrays in enumerate(parsed_data):
             adv = advantages[traj_idx]
             planes, globals_vec, f_acts, h_acts, m_acts = arrays
-            
+
             # Convert to tensors
             planes_t = torch.tensor(planes, dtype=torch.float32, device=device)
             globals_t = torch.tensor(globals_vec, dtype=torch.float32, device=device)
@@ -122,7 +121,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
 
             # Compute step-wise losses
             loss_f = ce_loss(f_logits, f_acts_t)
-            
+
             # h_logits: (N, 18, 10, 10). batch_h: (N, 10, 10)
             # ce_loss works directly on this shape
             loss_h = ce_loss(h_logits, h_acts_t)
@@ -130,7 +129,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
             loss_h = loss_h.mean(dim=(1, 2))
 
             loss_m_flags = bce_loss(m_preds[..., :2], m_acts_t[..., :2]).mean(dim=(1, 2))
-            
+
             # MSE loss only for active market actions
             active_m_mask = (m_acts_t[..., 2] > 0)
             loss_m_qty = torch.zeros_like(loss_m_flags)
@@ -140,7 +139,7 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
                 raw_mse = mse_loss(m_preds[..., 2], m_acts_t[..., 2])
                 raw_mse = raw_mse * active_m_mask.float()
                 loss_m_qty = raw_mse.sum(dim=1) / (active_m_mask.sum(dim=1) + 1e-8)
-            
+
             loss_m = loss_m_flags + loss_m_qty
 
             # Total unweighted step loss
@@ -165,13 +164,13 @@ def train_online_pg(iterations: int = 10, episodes_per_iter: int = 20, entropy_c
             pg_loss = pg_loss - (entropy_coef * total_entropy)
 
             pg_loss.backward()
-            
+
             # Gradient clipping to prevent instability
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             total_loss += pg_loss.item()
-        
+
         print(f"Iter PG Loss: {total_loss / len(parsed_data):.4f}")
 
         # Save model and rebuild main.py
