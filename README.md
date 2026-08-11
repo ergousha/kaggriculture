@@ -23,6 +23,7 @@ search/harness.py             # paired-seed match harness used by both searches
 search/smoke_test.py          # unit tests for the search stack
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
 opponents/vX_Y_Z.py           # every submitted version, kept as a sparring partner
+scripts/mine_daily.py         # mines Kaggle's daily episode dumps into strategy fingerprints
 scripts/probe_agent.py        # schema probe; writes logs/probe_schema.json
 scripts/sync_opponent.py      # pre-commit hook that versions main.py into opponents/
 kaggle_credentials.example.py # copy to kaggle_credentials.py (gitignored)
@@ -43,12 +44,21 @@ is used by the tooling, not by the agent.
 
 ```bash
 uv run python scripts/probe_agent.py                                    # confirm the schema
+uv run python scripts/mine_daily.py                                     # what the frontier does
 uv run python local_arena.py --agent main.py --opponent baseline --episodes 30
 uv run python local_arena.py --agent main.py --opponent opponents/adaptive.py --episodes 30
 uv run python -m search.cem --diagnose 40                                # loss-tail report
 uv run python -m search.cem --iterations 12 --pop 16 --episodes 8       # macro search
 uv run python submit.py --dry-run
 ```
+
+> **Read "What the leaderboard data says" before trusting anything else in this file,
+> and [docs/experiments.md](docs/experiments.md) before acting on it.** Mining the daily
+> episode dumps falsified several of the economic claims the agent was built on — but it
+> also produced targets that then lost 0/30 paired seeds, because ranking seats by final
+> cash mostly ranks them by a random shop draw. Sections that are known-wrong are marked
+> as such rather than deleted, and `docs/experiments.md` records which derived changes
+> actually survived an A/B.
 
 ---
 
@@ -67,8 +77,79 @@ The following mechanics are useful to keep in mind when designing the agent:
 
 ### The economics that decide the strategy
 
-Measured by walking the env's own `market_price` curve (cumulative revenue for selling
-N units into a virgin market):
+**The market does not start empty.** Inventory begins at **10,000 units per product**
+and town demand drains it every interval, so price is not a pot you deplete — it is a
+level that *recovers*, and over 30 days it **rises**. Median trajectory over 69 real
+Kaggle episodes (`scripts/mine_daily.py`), start → peak → end:
+
+| Product | start | peak | end | |
+| --- | --- | --- | --- | --- |
+| MILK | $160 | **$329** | $329 | +106%, never retraces |
+| STRAWBERRY | $120 | **$294** | $294 | +145%, never retraces |
+| WOOL | $200 | $247 | $247 | +24% |
+| EGG | $50 | $69 | $69 | +38%, and it is the flattest curve in the game |
+| WHEAT | $25 | $52 | $52 | +108% — buying wheat gets *worse*, selling it gets better |
+| CARROT | $35 | $42 | $42 | +20% |
+| MELON | $250 | $281 | **$269** | the **only** product that ends below its peak |
+
+**That table is from the 2026-08-05 field, and it does not generalise.** Re-mining the
+**2026-08-10** dump (150 episodes / 300 seats) shows prices rise only while the field
+*under*-produces. The 08-10 field has converged and crushes everything it touches:
+
+| product | 08-05 start→peak→end | 08-10 start→peak→end |
+| --- | --- | --- |
+| MILK | 160 → 329 → 329 | 169 → 222 → **3** |
+| STRAWBERRY | 120 → 294 → 294 | 128 → 206 → **110** |
+| WHEAT | 25 → 52 → 52 | 28 → 46 → 36 |
+| WOOL | 200 → 247 → 247 | 206 → 218 → 181 |
+| MELON | 250 → 281 → 269 | 256 → 272 → **25** |
+| EGG | 50 → 69 → 69 | 50 → 62 → 62 |
+
+Only EGG and CARROT hold their price, and only because nobody produces them. So the rule
+is **not** "produce late" — it is **"sell before the field does."** Town demand sets a
+drain rate and revenue is a race to fill it.
+
+What survives both days:
+
+1. **The curve shapes are real and worth knowing.** `MELON` and `WOOL` are `sq` above
+   target (amp 0.01 and 0.058), so they collapse on volume — ~150 melon past I0 takes it
+   from $250 to $31. `MILK` and `STRAWBERRY` are `linear` above target and tolerate
+   volume far better.
+2. **But "melon is a trap" does not follow, and was measured false.** Cutting
+   `MELON_TILE_TARGET` from 9 to 3 lost **0W-30L** against v0.0.9. Melon's 1.3% revenue
+   share in the field is low because everything else is bigger, not because it loses
+   money — the field still sells 30.6 melon for $1,410. A low share is not a verdict.
+3. **Egg is worthless, and this one holds.** 0.0% of top-decile revenue, the entire field
+   runs **zero coops and zero geese**, and turning our own egg engine back on measures
+   **−62.3%** on 30 paired seeds (better on 0/30, p~0.0). This is the one product claim
+   that is both unanimous in the field and confirmed by A/B.
+
+The full 08-10 comparison, the mechanics behind each number, and the change plan derived
+from them are in [docs/experiments.md](docs/experiments.md).
+
+**Fertilizer is sellable, and not applying any is the mistake.** Selling it is fine and
+the frontier does it too (11.5% of top-decile revenue) — supply is not the constraint,
+because `fertilizer_available` resets on **every animal tile every day**, so 14 pastures
+yield ~420 units an episode. The field applies ~75 of those and sells the rest. Applying
+is worth far more at the margin: `FERTILIZE` sets `fertilized_until_day = day + 2`
+(3 days inclusive), and a watered+fertilized strawberry production event adds **2 units
+instead of 1**, so with strawberry's interval of 2 a single application covers two
+production events and two applications take a tile from 4 units to 8 — roughly $400 of
+strawberry for 2 fertilizer that would have sold for ~$140.
+
+`FERTILIZE` is already in `main.py`'s legal `UNIT_OPS` set; `build_tasks` never emits it.
+This agent has issued **zero** `FERTILIZE` ops across every episode measured, and takes
+39.0% of its revenue from selling the raw fertilizer instead.
+
+#### Superseded: the "capped pot" table
+
+The table below was the basis for the melon-plus-egg plan, and it is wrong. It was
+produced by walking the price curve down from **inventory 0**, so it models a virgin
+market being flooded once. The real market starts at 10,000 and is continuously
+drained, so it never traverses that part of the curve.
+
+<details>
+<summary>The original cumulative-revenue table (do not plan from this)</summary>
 
 | Product | N=50 | N=100 | N=200 | N=400 | N=1600 |
 | --- | --- | --- | --- | --- | --- |
@@ -81,25 +162,14 @@ N units into a virgin market):
 | TOMATO | $2,411 | $4,318 | $7,221 | $10,453 | $12,199 |
 | STRAWBERRY | $3,648 | $3,847 | $3,947 | $4,147 | $5,347 |
 
-**Egg is the only product that scales.** Its glut curve is `log` with target 0.20, so
-the 1,600th egg still fetches $37. Everything else saturates: melon is a ~$26.5k pot,
-wool ~$8k, milk ~$6.5k, strawberry ~$5k. So the shape of the game is:
+It concluded that egg is the only product that scales, that melon is a one-shot
+$21.7k opening, that wool (~$8k) and milk (~$6.5k) are capped side pots saturated by
+2 sheep and 2 cows, and that growing wheat beats buying it at a 1:1 goose ratio.
+Every one of those is contradicted by the measured data above. The instructive part
+is *why* it was wrong: the curve was replicated exactly and then evaluated at a
+starting inventory the game never visits.
 
-1. **A one-shot melon opening.** 18 melon tiles → ~108 melons ≈ **$21.7k by day 12**,
-   on $1,440 of seed. Nothing else in the game returns 15× in 12 days. A second cycle
-   lands around day 26 but is worth much less, because the first one already moved the price.
-2. **An egg engine for the back half.** A goose costs $300, matures on day 4, then yields
-   2 eggs/day with `CARE`. Eggs never crash, so this is the only unbounded income.
-3. **Capped side pots** (wool, milk) raced with the opponent — 2 sheep and 2 cows
-   roughly saturate them.
-4. **Wheat as feed infrastructure.** A wheat tile yields ~1/day and a goose eats exactly
-   1/day, so the self-sufficient ratio is 1:1. Growing beats buying: the buy side ramps
-   on `sqrt` (draining 1,800 units takes wheat from $26 to $67), and surplus still sells
-   at ~$20 because the sell side is `log`.
-
-Fertilizer is deliberately ignored: it **cannot be sold**, melon already hits its
-`max_yield` of 6 on watering alone, and on wheat the whole play is +2 units for two
-actions — worse than a `CARE`. Collecting it anyway cost 36 of the 100 shed slots.
+</details>
 
 ---
 
@@ -113,7 +183,11 @@ actions — worse than a `CARE`. Collecting it anyway cost 36 of the 100 shed sl
   need wheat carried out daily. Coops are built **just-in-time against cash**.
 - `market_orders` walks a **capital priority ladder**. Cash owed to the egg engine
   (vacant coops + feed for birds already owned) is ring-fenced as `engine_claim`;
-  land and cash-crop seed can only draw on what is left.
+  land and cash-crop seed can only draw on what is left. **This is now known to be
+  backwards** — egg is 0.6% of frontier revenue, so the ladder's top claim funds the
+  game's weakest income line and starves land and livestock, which are its strongest.
+  See "What the leaderboard data says". Not yet changed, because changing it is a
+  measured strategy change and not a docs fix.
 - `target_hands` hires to `MAX_HANDS`, throttled by `HIRE_CASH_FRACTION`. Note that
   `hires_today` resets every day, so hands are re-hired daily — pausing hiring is not
   a saving, it is a shutdown (measured: −65.9%).
@@ -148,9 +222,116 @@ recognise. Across every run reported here: **0 crashes, 0 timeouts, 0 invalid st
 
 ---
 
+## What the leaderboard data says
+
+> **The confound that governs every number here.** Cash rank in an episode is mostly an
+> episode-level dice roll shared by both players. Shops are drawn at random with
+> replacement every 3 days (`town["unlocked_shops"].append(rng.choice(sorted(SHOPS)))`)
+> up to 8 instances, and four of the eight shop types buy strawberry — so how much demand
+> an episode has is a coin-flip sequence. Within an episode the two seats' realised
+> strawberry price differs by a mean of **$7.20/unit**; between episodes the stdev is
+> **$56.80** (range $25–$227), and the number of strawberry-buying shops explains it
+> (1 shop → $37/unit, 6 shops → $190/unit).
+>
+> So **sorting seats by final cash sorts them mostly by luck.** Over 300 seats,
+> `corr(cash, sold_STRAWBERRY)` is +0.088, `corr(cash, ops_productive)` is +0.095, and
+> `corr(cash, owned_tiles)` is **−0.139**. Volume, throughput and land are not what
+> separate the cohorts. Any "the top decile does X, so do X" inference from this section
+> is unsafe unless X is something the *whole* field does.
+>
+> Because the draw is shared by both seats it cancels pairwise, and the competition ranks
+> pairwise — so the gate that matters is the within-episode margin against the frozen
+> previous version. Full working in [docs/experiments.md](docs/experiments.md).
+
+Kaggle publishes the previous day's episodes as a daily dataset (~21 GB, ~700
+episodes). `scripts/mine_daily.py` streams it and keeps a ~1 KB fingerprint per
+player-seat, so a day compresses to well under a megabyte. Everything below comes
+from **69 real episodes / 138 player-seats** already in `logs/leaderboard_replays/`.
+
+Revenue is attributed exactly, not estimated: every `SELL` order is multiplied by the
+market price **at the step it was issued**.
+
+| | mean cash | MILK | STRAWBERRY | WOOL | MELON | WHEAT | FERT | **EGG** |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Top decile (n=13) | **$129,657** | 32.5% | 18.7% | 16.2% | 13.9% | 9.9% | 7.5% | **0.6%** |
+| Top quartile (n=34) | $93,670 | 29.1% | 15.6% | 17.1% | 16.1% | 11.8% | 9.0% | 0.8% |
+| **Ours (n=73)** | **$44,152** | 11.8% | 22.2% | 29.4% | 19.2% | 3.4% | 13.2% | 0.8% |
+| Bottom quartile (n=34) | $18,958 | 10.0% | 20.3% | 18.1% | 26.8% | 8.6% | 8.8% | 2.1% |
+
+Distribution over all 138 seats: min $1,110, p25 $33,114, median $39,962, p75 $56,902,
+max **$187,844**.
+
+**The egg engine earns 0.6–0.8% of revenue at every skill level, including ours.** It is
+not a back-half income source, it is a rounding error, and `main.py` gives it the top
+claim on capital and builds 22 coops per episode to serve it.
+
+### The gap is throughput, not cleverness
+
+Per farm, ours versus the top decile:
+
+| | ours | top decile | ratio |
+| --- | --- | --- | --- |
+| final cash | 44,152 | 129,657 | **2.94×** |
+| productive unit-ops | 940 | 2,125 | **2.26×** |
+| `WATER` ops | 319 | 750 | 2.35× |
+| `HARVEST` ops | 130 | 262 | 2.01× |
+| `FERTILIZE` ops | **0** | 44 | ∞ |
+| wheat bought | 75 | 592 | **7.93×** |
+| cows bought | 2.7 | 9.5 | 3.49× |
+| land plots bought | 1.6 | 6.1 | 3.79× |
+| hires issued | 239 | 293 | 1.23× |
+| hands at end | 4.0 | 9.8 | 2.45× |
+| `PASS` unit-turns | **1,294** | 705 | 0.55× |
+| coops at end | **22.4** | 2.5 | 0.11× |
+
+Cash tracks productive ops almost linearly (2.94× versus 2.26×), and the two cohorts
+spend a comparable number of unit-turns on logistics (3,700 versus 4,282). So this is
+not a routing problem and not a strategy-subtlety problem: **the frontier converts
+roughly twice as many unit-turns into work, on a farm with 2.5× the labour.** Our agent
+idles 1,294 unit-turns while holding 4 hands, having built 22 coops for a 0.8% revenue
+line. The known "worker PASS rate 23–33%" gap is the same finding measured from inside.
+
+**Wheat: buy it, don't grow it.** The top decile buys 592 wheat per episode and keeps
+~1 wheat tile, then sells surplus for 9.9% of revenue. Feeding ~16 animals off owned
+tiles costs the land and the unit-turns that the animals themselves need.
+
+**The frontier runs at zero cash.** The top scorer's balance was **$8 on day 4** — every
+dollar is converted to capacity immediately. `LAND_CASH_BUFFER = 1961.9` keeps ~$2k idle
+against a game where the winning line is fully invested.
+
+### Reading the daily manifest
+
+Alongside the dumps, the manifest tracks the field: median rating climbed 670 → 3,068
+between 2026-07-30 and 2026-08-09, but the last three days read 3,028 / 3,068 / 3,068,
+and the top-to-median gap narrowed from 483 to 150 while daily episode counts fell
+864 → 687. The field has converged. A knob tweak will not move a rank from here; the
+2.9× throughput gap will.
+
+### Caveats on the above
+
+- The 73 seats in the table above are **v0.0.5/v0.0.6**, from the 2026-08-05 field.
+  v0.0.9 *is* live (submission 55426703, 2026-08-11) and has its own numbers: **10 seats,
+  5W-3L, mean $50,957** against a 2026-08-10 field median of $83,606 and a top decile of
+  $132,689 — a **2.60×** gap. That comparison, not the one above, is the current
+  baseline; see [docs/experiments.md](docs/experiments.md).
+- The market findings are day-dependent and were re-measured on 08-10. Price *drift*
+  did not survive; the melon/wool collapse, the egg result and the throughput gap did.
+- v0.0.9's `MAX_COWS = 9` / `MAX_SHEEP = 6` bracket the field's 9.3 / 4.1, so the CEM
+  search found roughly the right livestock. The problem is upstream of the ceilings:
+  22 pastures **plus 14.7 coops** consume 36.7 of our 50 tiles, leaving ~13 for crops
+  against the field's ~60, and `engine_claim` is what funds the coops first.
+
+---
+
 ## Results
 
 v0.0.9, seats alternated each episode, 720 steps, seeded and reproducible.
+
+**These numbers do not predict leaderboard placement.** The same agent family that
+reports $73k here averaged $44k across 73 real Kaggle seats, against a frontier of
+$188k. `starter` and `adaptive` barely produce, so they neither contest the shared pots
+nor force tempo; beating them measures survival, not throughput. Treat this table as a
+reliability smoke test.
 
 | Opponent | Eps | Mean cash | Median | Min | Win rate | Crashes | p95 turn |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -304,11 +485,33 @@ its docstring so nobody mistakes it for a live input.
 
 ### Known gaps
 
-- **Worker PASS rate 23–33%.** Assignment leaves a quarter to a third of unit-turns
-  doing nothing once the task list is exhausted mid-day. Two attempts to close it
-  are already recorded as failures (see "Optimal assignment loses to greedy", and
-  `IDLE_PREPOSITION` below), so this is harder than it looks. More coops would absorb
-  it, but they are cash-gated.
+Ordered by measured cost. The first five are all from the leaderboard mining and none
+of them is fixed yet.
+
+- **The egg engine is funded first and earns 0.6% of revenue.** `engine_claim` in
+  `market_orders` ring-fences cash for coops and goose feed ahead of land and livestock,
+  and the agent builds 22.4 coops per episode. The frontier builds 2.5 and buys 9.5 cows
+  to our 2.7. This is the single largest misallocation in the file.
+- **Zero `FERTILIZE` ops, ever.** The op is legal and present in `UNIT_OPS`;
+  `build_tasks` never emits it. Meanwhile the agent *sells* ~190 fertilizer per episode
+  for 13.2% of revenue, at $100, instead of applying it to strawberry at $294.
+- **Wheat is grown, not bought.** 75 bought per episode against the frontier's 592. The
+  owned wheat tiles cost land and unit-turns that the animals need.
+- **Land and labour are under-bought.** 1.6 plots and 4.0 end-of-episode hands against
+  6.1 and 9.8. `LAND_CASH_BUFFER = 1961.9` holds ~$2k idle in a game whose winning line
+  sits at $8 on day 4.
+- **Melon is still 19.2% of our revenue.** It is the bottom quartile's signature (26.8%)
+  and the only product whose price ends below its peak.
+- **Worker PASS rate 23–33%**, which the mining measures as 1,294 idle unit-turns per
+  episode against the frontier's 705. Two attempts to close it are already recorded as
+  failures (see "Optimal assignment loses to greedy", and `IDLE_PREPOSITION` below), so
+  routing is not the lever — but the cohort data says the frontier spends *more*
+  unit-turns on logistics than we do, not fewer, so the leak is not travel. It has 2.5×
+  the labour and enough productive work to give it.
+- **No frontier sparring partner exists.** `starter` and `adaptive` do not contest pots,
+  self-play only measures the agent against its own blind spots, and a leaderboard
+  replay goes bankrupt by day 12 (see "Opponents"). Every A/B in this file was measured
+  against opponents that produce a fraction of what the leaderboard produces.
 - `IDLE_PREPOSITION` — walking otherwise-idle units toward the shed instead of
   `PASS` — looked promising at 8 seeds (+3.2%, better on 7/8) and then measured
   **−16.4%** vs baseline (p~4e-05, 4/30) and **−8.7%** vs adaptive (p~0.015, 11/30)
@@ -327,6 +530,13 @@ its docstring so nobody mistakes it for a live input.
 Worth writing down, because the obvious textbook models give the right advice for
 the wrong reasons, and the wrong reasons predict the wrong next experiment.
 
+> **Correction from the leaderboard data.** The premise underneath this whole section —
+> that the glut counter is cumulative and monotone — is false for every product except
+> melon. Inventory starts at 10,000 and town demand drains it, so price *recovers* and
+> rises across the episode. The conclusions below mostly survive, but for different
+> reasons than the ones given, and the differences change what to try next. Corrections
+> are inline.
+
 **It is not Cournot.** Cournot has firms choosing quantities each period against a
 price that depends on *current* total supply, and its equilibrium involves restraint.
 Here the glut counter is **cumulative and monotone** — price is a stock you deplete,
@@ -335,6 +545,15 @@ rivalry): the pot goes to whoever draws it down first, restraint is strictly
 dominated because the rival simply takes what you leave, and the finite horizon adds
 a *second*, independent reason not to withhold (unsold stock scores $0). That matches
 `PRICE_FLOOR_SELLING` measuring −1.8%.
+
+> **Wrong for the right answer.** The glut counter is *not* monotone: town demand
+> replenishes it, so the market is much closer to Cournot-with-recovery than to
+> common-pool extraction. Restraint is still dominated, but only because unsold stock
+> scores $0 — the "rival takes what you leave" half does not hold, since what you leave
+> is largely restored. Melon is the one product where the extraction model is accurate,
+> because the field's dump rate exceeds the drain rate. The practical difference: since
+> prices *rise*, production should be back-half weighted, which the "deplete it first"
+> model actively argues against.
 
 **It is not Chicken.** Chicken is anti-coordination: mutual aggression is the
 catastrophe. Here, if both players plant melon nobody crashes — the ~$26.5k pot is
@@ -350,6 +569,13 @@ supply, so the two players' payoffs are **separable** in the egg dimension. The 
 sub-game has no strategic interaction at all — it is a single-agent MDP wearing a
 Markov-game costume, which is exactly why it can be optimised without modelling the
 opponent.
+
+> **True and irrelevant.** The separability argument is correct and it is why the egg
+> sub-game looked so attractive: a clean single-agent MDP is a much nicer object than a
+> contested pot. But the same flat curve that makes egg strategically inert also makes
+> it *poor* — it drifts $50 → $69 while milk goes $160 → $329. Egg is 0.6% of frontier
+> revenue. Tractability was mistaken for value, and the agent's capital ladder was built
+> around the most analysable line rather than the most profitable one.
 
 **Why playing deaf is correct** is a latency argument, not a tempo slogan: see the
 PvP table above. Information whose reaction lag exceeds the horizon over which it is
@@ -485,12 +711,94 @@ improvement**, whatever it does to `baseline`. `v0_0_7` and `v0_0_8` are absent 
 purpose — both embedded network weights, and `v0_0_8` loses to `starter`.
 
 `opponents/leaderboard_replay.py` replays a downloaded 720-step Kaggle episode
-turn-by-turn, so a downloaded top-leaderboard match can be used as a sparring
-partner:
+turn-by-turn. **It had never worked, and even fixed it is not a cash-comparable
+sparring partner.** Both halves of that are worth recording.
+
+Three independent bugs, each of which failed silently as "the opponent finished on
+exactly its $3,000 starting money" — which reads as a weak opponent, not a broken one:
+
+1. **`__file__` at module level.** The env loads an agent with
+   `exec(compile(src, path), {})`, and that `{}` has no `__file__`, so the import raised
+   `NameError` and the env rejected the agent as `InvalidArgument` before turn 1. The
+   path is now recovered from the calling frame's `co_filename`, which `compile()` does
+   set.
+2. **`obs.get("step", 0)`.** `step` lives in the *shared* observation, so only the seat
+   at index 0 receives it — and `local_arena` alternates seats, so on half of every run
+   the replay read step 0 on all 720 turns. Now derived from the per-seat `day`/`hour`
+   (`step == day * turnsPerDay + hour`).
+3. **Newest `.json` by mtime, no schema check.** `logs/leaderboard_replays/` holds 116
+   *Halite 4* replays alongside the 70 kaggriculture ones, so the newest file was
+   usually Halite: every step index missed, every turn returned `PASS`. Candidates are
+   now sniffed for `"name": "kaggriculture"` from a 64 KB head, the default pick is the
+   highest-scoring episode, the default seat is its winner, and selection is announced
+   on stderr.
+
+**And then it still does not work as an opponent, for a reason no fix addresses.** A
+replay is open-loop: it re-issues an action stream that was only meaningful against the
+state it was recorded in. Replayed against our agent on its own seed, the $187,844
+winner scores **$28**. The money trajectory is identical to the recording through day 4,
+diverges by $96 on day 5, and is bankrupt by day 12:
+
+| day | recorded | replayed |
+| --- | --- | --- |
+| 4 | $8 | $8 |
+| 5 | $326 | $422 |
+| 12 | $552 | $22 |
+| 18 | $8,182 | $0 |
+| 24 | $79,553 | $0 |
+
+Its 872 `WATER` and 364 `FEED` ops all execute — the op histogram matches the recording
+exactly — but it ordered 422 `SELL STRAWBERRY` against a shed holding 0, because the
+purchases those harvests depended on failed. **The frontier strategy is maximally
+capital-invested** (balance $8 on day 4), which is precisely why it cannot absorb a $96
+perturbation. That fragility is itself the most useful thing the replay taught us.
+
+So: useful for reproducing a frontier *action stream* and for the offline statistics in
+`scripts/mine_daily.py`, useless for comparing cash. The right frontier sparring partner
+is a **scripted reimplementation** of the mined strategy (≈15 pastures at 9 cows / 6
+sheep, wheat bought not grown, strawberry fertilized, full land buyout, 12 hands), which
+is closed-loop and does not fall over. That is not written yet.
 
 ```bash
-uv run python local_arena.py --agent main.py --opponent logs/episode-89987566-replay.json --episodes 10
+uv run python local_arena.py --agent main.py --opponent leaderboard --episodes 10
+uv run python local_arena.py --agent main.py \
+    --opponent logs/leaderboard_replays/episode-90158870-replay.json --episodes 10
 ```
+
+---
+
+### Daily episode mining (`scripts/mine_daily.py`)
+
+Kaggle publishes the previous day's episodes as a dataset (~21 GB, ~700 episodes). None
+of it is useful raw and none of it is worth keeping. The script streams each replay,
+keeps a ~1 KB fingerprint per player-seat, and discards the episode — a day compresses
+to well under a megabyte, so `--append` turns the CSV into a time series of what the
+field is doing.
+
+```bash
+# mine what is already downloaded, write logs/daily_fingerprints.csv, print the report
+uv run python scripts/mine_daily.py
+
+# fetch a daily dump first (WARNING: ~21 GB), mine it, append to the running CSV
+uv run python scripts/mine_daily.py --dataset kaggriculture-episodes-2026-08-09 --append
+
+# re-print the cohort report without re-parsing anything
+uv run python scripts/mine_daily.py --report-only
+```
+
+Per seat it records final cash, realised revenue per product (`SELL` volume × the price
+at the step it was issued, not a curve estimate), `BUY_*`/`HIRE`/`BUY_LAND` volumes, the
+full unit-op histogram split into productive versus logistics, end-of-episode
+composition (owned tiles, hands, crop tiles, animals, fertilized tiles), unsold shed
+stock, and the episode's per-product price trajectory.
+
+The report prints cohort comparisons (top decile / top quartile / ours / bottom
+quartile), the exogenous price drift table, and a gap table of ours versus the frontier.
+`--me` selects our seats by team-name substring. Non-kaggriculture files are skipped by
+a 64 KB head check, so pointing it at a directory containing Halite replays is safe.
+
+This is the input the macro search should be seeded from: the frontier composition it
+reports maps directly onto the parameters in `search/space.py`.
 
 ---
 
