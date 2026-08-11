@@ -54,6 +54,9 @@ ALLOWED_IMPORTS = {
     "sys",
     "numpy",
     "base64",
+    # zlib: the route-replay agent stores its action route as base85 of zlib, which
+    # is what keeps a 719-step plan inside ~20 KB. Standard library, no wheel.
+    "zlib",
     "io",
 }
 
@@ -140,7 +143,6 @@ def check_static() -> list[str]:
 
     # Entrypoint: name, arity, and — critically — position.
     funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
-    classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
     agent_def = next((n for n in funcs if n.name == "agent"), None)
     if agent_def is None:
         fails.append("no top-level `agent` function defined")
@@ -164,8 +166,12 @@ def check_static() -> list[str]:
                 "kaggle-environments loads the LAST callable in the file, so this would "
                 "error on every turn."
             )
-    if not classes:
-        fails.append("expected the planner/scheduler classes to be inline (self-contained)")
+    # No class check. This used to require the planner/scheduler classes to be
+    # present and inline, which was a proxy for "the file is self-contained". It is
+    # the wrong proxy: v0.2.0 is a route-replay agent with no classes at all, and
+    # self-containment is already enforced by the import allowlist and by loading
+    # the file the way the env loads it. A structural assertion about one
+    # architecture cannot gate a repo that changes architecture.
     return fails
 
 
