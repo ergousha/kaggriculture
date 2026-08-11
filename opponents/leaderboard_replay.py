@@ -29,7 +29,7 @@ def _get_replay_data():
     player_idx = int(os.environ.get("KAGGRICULTURE_REPLAY_PLAYER", "0"))
 
     if not path or not os.path.exists(path):
-        # Default: find latest JSON replay in REPLAY_DIR or elite_trajectories
+        # Default: newest JSON replay in REPLAY_DIR
         candidates = []
         if os.path.exists(REPLAY_DIR):
             candidates.extend(
@@ -38,11 +38,6 @@ def _get_replay_data():
                     for f in os.listdir(REPLAY_DIR)
                     if f.endswith(".json") and not f.startswith("_")
                 ]
-            )
-        elite_rep = os.path.join(LOG_DIR, "elite_trajectories", "replays")
-        if os.path.exists(elite_rep):
-            candidates.extend(
-                [os.path.join(elite_rep, f) for f in os.listdir(elite_rep) if f.endswith(".json")]
             )
 
         if not candidates:

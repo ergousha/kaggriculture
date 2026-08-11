@@ -17,9 +17,20 @@ import sys
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+PROJECT_ROOT = os.path.dirname(HERE)
+sys.path.insert(0, PROJECT_ROOT)
 
-from leaderboard_crawler import load_kaggle_api  # noqa: E402
+
+def load_kaggle_api() -> Any:
+    """Authenticate against the Kaggle API using submit.py's credential loader."""
+    from submit import load_credentials
+
+    load_credentials()
+    from kaggle.api.kaggle_api_extended import KaggleApi
+
+    api = KaggleApi()
+    api.authenticate()
+    return api
 
 
 def download_replay(api: Any, episode_id: int, target_dir: str) -> str | None:
@@ -146,7 +157,7 @@ def main():
         print("No failures to download.")
         sys.exit(0)
 
-    target_dir = os.path.join(HERE, "logs", f"failures_{args.version}")
+    target_dir = os.path.join(PROJECT_ROOT, "logs", f"failures_{args.version}")
     os.makedirs(target_dir, exist_ok=True)
     print(f"Downloading up to {args.limit} replays to {target_dir}...")
 
