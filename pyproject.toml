@@ -8,7 +8,6 @@ dependencies = [
     "kaggle>=1.6.14",
     "kaggle-environments>=1.32.6",
     "numpy>=2.0.0",
-    "torch>=2.13.0",
 ]
 
 [dependency-groups]
@@ -43,7 +42,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["main", "local_arena", "submit", "leaderboard_crawler"]
+known-first-party = ["main", "local_arena", "submit", "search"]
 
 [tool.mypy]
 python_version = "3.12"
