@@ -9,6 +9,116 @@ daily episode dumps. Fingerprint CSVs live in `logs/` and are regenerable.
 
 ---
 
+## The gate problem is solved: rank against a calibrated ladder
+
+`scripts/rank_ladder.py` plays the agent seat-swapped against **Rayk Kretzschmar's
+reference ladder** — ten agents whose relative strength is already measured and
+documented. Rungs 0-5 are vendored under `opponents/ladder/` (MIT, `LICENSE` and
+`NOTICE` retained); rungs 6-9 embed the shared public meta line and are deliberately
+*not* vendored, because the dataset's own NOTICE asks that submissions be built on 0-5.
+`--fetch` pulls them into `reference/ladder/` for measurement only.
+
+```bash
+uv run python scripts/rank_ladder.py --fetch
+uv run python scripts/rank_ladder.py --episodes 6
+```
+
+Rungs 0-5 share a **byte-identical scheduler** and differ only in a `POLICY` dict, so a
+gap between them is an economic decision and nothing else. That is what none of our
+previous gates had.
+
+### v0.1.1 placement, 6 episodes per rung, seats alternated
+
+| tier | agent | result | ours | theirs | margin |
+| --- | --- | --- | --- | --- | --- |
+| 0 | fallow_finn | 6W-0L | $84,746 | $3,000 | +$81,746 |
+| 1 | wheat_walter | 6W-0L | $71,871 | $6,959 | +$64,912 |
+| 2 | rotation_rosa | 6W-0L | $74,802 | $12,998 | +$61,804 |
+| 3 | homestead_hana | 6W-0L | $75,366 | $13,530 | +$61,836 |
+| 4 | melon_mateo | 6W-0L | $68,433 | $19,899 | +$48,534 |
+| 5 | rancher_rita | 6W-0L | $50,454 | $22,583 | +$27,871 |
+| **6** | **broker_bea** | **0W-6L** | $41,078 | $126,176 | **−$85,098** |
+| 7 | ledger_lena | 0W-6L | $40,711 | $126,234 | −$85,524 |
+| 8 | slotter_silas | 0W-6L | $40,766 | $124,639 | −$83,873 |
+| 9 | closer_cleo | 0W-6L | $30,168 | $108,450 | −$78,283 |
+
+**RUNG: between tier 5 and tier 6. 36/60 overall.**
+
+This is the cleanest measurement in the repo. It also reframes the plateau: our
+`MAX_COWS = 9` / `MAX_SHEEP = 6` livestock core *is* tier 5 (`rancher_rita` is 10 cows /
+6 sheep and banks ~$53k against `starter`; we bank $55-56k), and we beat her by +$27,871
+so we are genuinely above that rung. The reference league has Rita losing to broker_bea
+by −$128,041 where we lose by −$85,098, so the ~$56k plateau is not a bug in our agent —
+**it is the ceiling of the whole authored-strategy band.**
+
+### Why tiers 6-9 are unreachable by tuning: they are not strategies
+
+Every rung above 5 runs **the same production plan** — a base85-encoded `_TRACE` field
+that the dataset's NOTICE describes as "the shared public meta line", found as identical
+712-turn farmer/hand sequences across 104 distinct teams in 530 downloaded replays. The
+four top rungs differ only in their market layer.
+
+The current #1 on the leaderboard is the same shape. Its notebook is
+[25/27 Strict-Future | v27 Midgame Meta Reset](https://www.kaggle.com/code/kaitofukami/25-27-strict-future-v27-midgame-meta-reset),
+and the published artifact decodes to 20,813 bytes with SHA-256
+`f48c2116…` (verified). It contains:
+
+- `_LEGACY_ACTIONS` — one hardcoded **719-step action list**, used in both seats,
+  credited to team Ezzzzzekki's public replay of episode 91493566 seat 0;
+- `_weed_repair_action` — if a scripted `PLANT`/`BUILD_PASTURE` lands on a `WEED`, emit
+  `DIG` instead, replay the intended action next step, then shift the next 8 steps of the
+  trace by one;
+- `_rank_sell_slots` — reorder the SELL orders **within their existing slots** by
+  price impact × a bounded town-demand urgency term. Nothing about production changes;
+- `_align_hands` — pad or truncate the hands list to the live hand count.
+
+That is the entire agent. There is no planner, no scheduler, no opponent model. The
+notebook's own ablation puts most of the gain on the route and about +$819 to +$1,115 of
+margin on the sell layer.
+
+**So the competition above ~$56k is not a strategy competition.** It is route selection
+plus a thin repair layer, and the ~$130k the top rungs bank against us is what a
+hand-selected tape achieves. That is the honest explanation for eleven consecutive failed
+A/Bs: we were tuning a closed-loop planner against opponents that do not plan.
+
+### Two corrections from the reference material
+
+**Engine version.** The README claimed verification against kaggle-environments 1.32.3.
+We actually run **1.32.6**, and so does the competition (Kaito's notebook records
+`research_engine_version: 1.32.6`). This matters more than it looks: the ladder's NOTICE
+warns that the same game on the same seed pays out completely differently across
+releases — *Rancher Rita banks 28,370 on 1.32.3 and 9,002 on 1.32.6*. All ladder numbers
+above are ours, measured on 1.32.6, so they are internally consistent; the dataset's own
+published banks are 1.32.3 and are not comparable to them.
+
+**Shop demand, not curve steepness, sets the realised price.** `_town_consume` drains
+market inventory every `townShopSellInterval` for each unlocked shop that lists the
+product, which is what holds prices up all season:
+
+| product | shops demanding it | base | shop demand/day |
+| --- | --- | --- | --- |
+| WHEAT | 5 | $25 | 30 |
+| STRAWBERRY | 4 | $120 | 24 |
+| MILK | 3 | $160 | 18 |
+| EGG | 2 | $50 | 12 |
+| CARROT / TOMATO | 2 | $35 / $60 | 12 |
+| WOOL | 1 | $200 | 12 |
+| **MELON** | **0** | **$250** | **0** |
+
+**Melon appears in no shop at all**, so nothing ever drains it and its price only falls —
+it is genuinely a one-shot pot, which is why `melon_mateo` (tier 4) meters sales into
+12-unit lots and why buying more land does not help him. This is the mechanism behind our
+own measurement that cutting `MELON_TILE_TARGET` 9→3 lost 0W-30L: the first ~$26k of the
+pot is real money, and the tiles were collecting it.
+
+It also independently confirms two of our results. The dataset author tested adding geese
+to Rita in 32 configurations and **all 32 lost**, matching our `EGG_ENGINE` ablation
+(−62.3%, 0/30). And Rita's documented failure mode — "with a 4-day feed reserve instead of
+16 she goes bankrupt on day 3 and loses to tier 1" — is the same effect as our
+`LAND_CASH_BUFFER` 1961→400 experiment (23.3%, and 5W-25L in v0.1.0).
+
+---
+
 ## Measurement: what counts as evidence
 
 **`--opponent baseline` is not a gate.** v0.0.9 reports $64,351 against `starter` and
@@ -22,16 +132,25 @@ three bugs and is now fixed, but even fixed it is open-loop: replayed against a 
 opponent the $187,844 winner scores $28, because the frontier strategy runs at $8 cash on
 day 4 and cannot absorb a $96 perturbation. See README "Opponents".
 
-**Two gates that do work:**
+**The gate that actually works — fingerprint against real opponents, within episode.**
+Download a live submission's episodes and run `scripts/mine_daily.py` over them, then
+compare our per-seat fingerprint to *the opponent we faced in that same episode*. Both
+seats share the episode's shop draw, so the confound below cancels, and the opponent is a
+real strategy rather than a copy of ourselves. This is what finally explained v0.1.0.
 
-1. **Profile distance.** Run local matches with `--save-replays`, mine them with
-   `scripts/mine_daily.py`, and compare our fingerprint to the field's top decile. This
-   is dense, per-episode, and independent of how strong the opponent is. The table in
-   "Diagnosis" is exactly this comparison, and every row is a target.
-2. **Head-to-head against the frozen previous version**, 30 paired seeds, seats
-   alternated. Both sides contest the same pots, so this is the closest local proxy for
-   P(win). A change that does not beat the previous version head-to-head is not an
-   improvement.
+```bash
+uv run python scripts/mine_daily.py logs/live_v0_1_0 --out logs/fingerprints_live_v0_1_0.csv
+```
+
+**Head-to-head against the frozen previous version**, 30 paired seeds, seats alternated,
+is necessary but **not sufficient**. It reliably catches regressions and it correctly
+rejected six of the eight v0.1.0 candidates. It cannot catch a wrong strategy *class*,
+because a frozen copy of ourselves shares our blind spots — v0.1.0 won it 23W-7L and moved
+the live score by nothing. Use it as a veto, never as proof.
+
+**Do not compare against the field's cash-sorted top decile.** That was the third gate
+proposed here and it is invalid; see the confound below. The "Diagnosis" table further
+down is preserved as a record of the mistake, not as a target list.
 
 Kaggle itself is the third gate, with a budget of **5 submissions/day**. Track a live
 submission with `api.competition_list_episodes(sub_id)`; ~9-12 episodes accumulate within
@@ -91,10 +210,15 @@ does. **Land is mildly negative.** Every "close the 2.6× gap by matching the to
 ranking and does not survive this.
 
 **What this means for measurement.** Because the shop draw is shared by both seats, it
-cancels in a pairwise comparison. The competition ranks pairwise. So the only gate worth
-trusting is the **within-episode margin** — paired seeds against the frozen previous
-version — and that gate was correctly rejecting these changes while this file was arguing
-with it. Trust the arena.
+cancels in a pairwise comparison, and the competition ranks pairwise. So the gate has to
+be a **within-episode margin**.
+
+Paired seeds against the frozen previous version is *one* such gate and it correctly
+rejected the changes this file was arguing with. But it is not sufficient, and v0.1.0
+is the counterexample: it won that gate 23W-7L and moved the live score by nothing,
+because a frozen copy of ourselves shares our blind spots. See the v0.1.0 post-mortem.
+The gate that catches a wrong strategy class is the same fingerprint comparison run
+against **downloaded live opponents**.
 
 **What survives the confound.** Compositional facts of the form "nobody in the field does
 this" are not cash-sorted and still hold: all 300 seats ran **zero coops and zero geese**,
@@ -126,7 +250,13 @@ This is also why the tooling had to be fixed before any of it could be trusted: 
 
 ---
 
-## Diagnosis: v0.0.9 versus the 2026-08-10 top decile
+## Diagnosis: v0.0.9 versus the 2026-08-10 top decile — INVALID, kept as a record
+
+> **Every ratio in this table is unsafe.** The "top decile" is the lucky tail of the shop
+> draw, not a stronger strategy, so these are not targets. Four changes were derived from
+> it and lost; see the v0.1.0 section. It is kept because the *compositional* rows that do
+> not depend on cash ranking (zero coops, zero geese, ~73 `FERTILIZE` ops field-wide) held
+> up under A/B, and because the shape of the error is worth being able to re-read.
 
 v0.0.9 = 10 real Kaggle seats (submission 55426703, live 2026-08-11).
 Field = 150 sampled episodes / 300 seats from `kaggriculture-episodes-2026-08-10`,
@@ -281,6 +411,136 @@ numbers are not predictive.
 
 ---
 
+## v0.1.0 post-mortem: it passed its gate and moved nothing
+
+v0.1.0 went live 2026-08-11 08:49 (submission 55428161) and the team score sits at
+**586.3, rank #2440/3892** (leader 3214.7, leaderboard median 726.5). That reads as a
+collapse. It is not one, and the reason it is not is the useful part.
+
+### Nothing regressed. The plateau is five versions old.
+
+| version | live eps | record | our mean cash | opp mean cash |
+| --- | --- | --- | --- | --- |
+| v0.0.6 | 117 | 57W-60L (48.7%) | $56,735 | $68,789 |
+| v0.0.7 | 89 | 41W-48L (46.1%) | $56,245 | $56,218 |
+| v0.0.8 | 12 | 4W-8L (33.3%) | $2,909 | $12,358 |
+| v0.0.9 | 30 | 14W-16L (46.7%) | $55,157 | $56,275 |
+| **v0.1.0** | 29 | **14W-15L (48.3%)** | **$56,279** | $54,498 |
+
+Every version except the neural one lands on the same spot: **~$56k and ~48%**. v0.1.0 is
+marginally the best of them. A score of 586.3 is what a coin-flip record produces under
+rating-based matchmaking — you are paired with similarly-rated agents, so 50% holds you at
+the 600 entry rating indefinitely. **The score did not fall because of v0.1.0; it never
+rose, for five versions.** v0.0.8 stopped being matched at 06:47 on 08-11, so it is no
+longer dragging the team.
+
+### The paired-seed gate could not have detected this, and this file overclaimed it
+
+Above, the shop-draw section concludes "the only gate worth trusting is the within-episode
+margin against the frozen previous version." That is wrong, and v0.1.0 is the
+counterexample. 23W-7L against `opponents/v0_0_9.py` measures the margin against **one
+agent that shares our strategy DNA**. It correctly detected that v0.1.0 fixed v0.0.9's
+specific defects — 14.4 empty coops out of 50 tiles. It cannot detect that both agents are
+playing the wrong game, because both make the same mistake.
+
+The gate that does work needs no new tooling: download the live episodes and run
+`scripts/mine_daily.py` over them. That gives a **within-episode comparison against real
+opponents**, and the shop-draw confound still cancels because both seats share the draw.
+It was available the whole time.
+
+```bash
+# after a submission has accumulated episodes
+uv run python scripts/mine_daily.py logs/live_v0_1_0 --out logs/fingerprints_live_v0_1_0.csv
+```
+
+### What that gate says: we are a fixed-output machine playing a different game
+
+29 paired live episodes, us versus the actual opponents we faced.
+
+**Our own behaviour is statistically identical in wins and losses. Only the opponent
+varies.**
+
+| | us in our 13 wins | us in our 16 losses |
+| --- | --- | --- |
+| wheat sold | 29.8 | 29.6 |
+| milk sold | 159.3 | 158.2 |
+| wool sold | 127.2 | 127.4 |
+| `WATER` | 284.8 | 261.9 |
+| owned tiles | 48.1 | 48.4 |
+| productive ops | 1,384 | 1,358 |
+
+| | opponent in our wins | opponent in our losses |
+| --- | --- | --- |
+| final cash | $38,655 | $71,081 |
+| **wheat sold** | **186.4** | **505.2** |
+| melon sold | 70.1 | 100.6 |
+| strawberry sold | 56.1 | 77.9 |
+| `FERTILIZE` | 10.9 | 31.8 |
+
+We emit the same farm every episode and win or lose on who we are matched against. The
+opponents who beat us are the ones running heavy wheat rotation.
+
+**Revenue mix, same 29 episodes:**
+
+| | MILK | WOOL | FERTILIZER | STRAWBERRY | MELON | WHEAT |
+| --- | --- | --- | --- | --- | --- | --- |
+| us | 35.0% | 24.0% | 19.0% | 11.7% | 8.4% | **1.9%** |
+| them | 24.3% | 8.6% | 9.2% | 17.9% | 19.2% | **19.1%** |
+
+**Per-farm gaps against real opponents** (ratio > 1 means they do more):
+
+| metric | us | them | ratio |
+| --- | --- | --- | --- |
+| **wheat sold** | 29.7 | 362.3 | **12.19×** |
+| `WATER` | 272.2 | 885.9 | **3.25×** |
+| melon seed bought | 8.3 | 25.9 | 3.12× |
+| `PLANT` | 70.1 | 142.7 | 2.03× |
+| `FERTILIZE` | **0** | 22.4 | ∞ |
+| owned tiles | 48.3 | 72.4 | 1.50× |
+| productive ops | 1,370 | 1,890 | 1.38× |
+| `PASS` unit-turns | 1,432 | 764 | 0.53× |
+| sheep alive | 6.0 | 2.9 | 0.49× |
+| wool sold | 127.3 | 56.6 | 0.44× |
+| fertilizer sold | 264.2 | 134.2 | 0.51× |
+
+### Why wheat is the engine we skipped
+
+Two properties, both read out of the interpreter:
+
+1. **Cycle.** `WHEAT`: seed **$10**, `first_yield_day` 2, `max_yield` 6, `ongoing: False`.
+   The tile dies on `HARVEST` and can be replanted immediately, so it is a 2-day, $10,
+   6-unit loop — the shortest capital cycle in the game.
+2. **Glut resistance.** Its above-target curve is `log` with amp 0.83, the flattest in the
+   game. Revenue for dumping N units starting from inventory I0:
+
+| product | N=50 | N=130 | N=360 | price after 360 | above-curve |
+| --- | --- | --- | --- | --- | --- |
+| **WHEAT** | $1,127 | $2,823 | **$7,513** | **$20** | `log` amp 0.83 |
+| FERTILIZER | $4,755 | $11,323 | $23,076 | $28 | `linear` amp 0.20 |
+| MELON | $12,098 | $25,267 | $26,687 | $1 | `sq` amp 0.01 |
+| WOOL | $7,655 | $7,999 | $8,229 | $1 | `sq` amp 0.058 |
+| MILK | $5,430 | $6,235 | $6,465 | $1 | `linear` amp 2.10 |
+| STRAWBERRY | $3,648 | $3,877 | $4,107 | $1 | `linear` amp 1.92 |
+
+Wheat is the only product that still pays a real price after 360 units. Everything else
+hits the $1 floor. (These are worst-case one-shot dumps; the town's drain means reality
+sits above them, which is exactly why the steep curves punish batch size.)
+
+We take **43% of revenue from wool plus fertilizer** — wool being the second-steepest
+curve in the game, and fertilizer a pot the town never replenishes at all — and 1.9% from
+the one glut-proof product.
+
+### The land experiment was not a false negative
+
+`LAND_CASH_BUFFER` 1961→400 measured 5W-25L in v0.1.0. The hypothesis recorded here was
+that it failed only because nothing could *use* the land, and that land plus wheat rotation
+were one change rather than two. **That was retested in v0.1.1 with the wheat rotation in
+place and it is false:** buffer 400 gives 23.3% against 56.7% at 1961.9, delta −$3,049,
+p~0.006. Land is genuinely not the constraint, which is also what
+`corr(cash, owned_tiles) = −0.139` said.
+
+---
+
 ## Plan for what remains
 
 The throughput targets from the cash-sorted cohorts are withdrawn. What is left is
@@ -328,10 +588,71 @@ right every time.
 
 ---
 
+## v0.1.1 — wheat as a cash crop, and four more refuted hypotheses
+
+Aimed at the 12.19× wheat gap from the v0.1.0 post-mortem. One of five parts survived.
+All A/Bs 30 paired seeds against `opponents/v0_1_0.py`.
+
+| change | result | verdict |
+| --- | --- | --- |
+| Wheat sized as a real crop target (`WHEAT_TILE_TARGET` 14, `WHEAT_LAND_FRACTION` 0.70) instead of `ceil(n_animals × 0.4778)`, and the leftover-land tail switched from `STRAWBERRY` to `WHEAT` | **56.7% (17W-13L)**, and 80.0% vs v0.0.9 | **kept** |
+| `PRIO_PLANT` 550 → 760 / 900 | 6.7% (2W-28L) at both, −$13.5k and −$18.9k, p~1e-05 | reverted |
+| `FERTILIZE` task on both crop families | 36.7% at prio 660, 33.3% at 300 or 1 | flag off |
+| `LAND_CASH_BUFFER` 400 **with** the wheat rotation in place | 23.3% (7W-23L), −$3,049, p~0.006 | reverted |
+
+### What the failures say, and they say the same thing three times
+
+`PRIO_PLANT` raised above the animal chores loses 2W-28L. `FERTILIZE` loses even at
+priority 1 — and the giveaway is that priority 300 and priority 1 produce **byte-identical
+results** (delta +0, better on 0/30), so at those levels the task is never the reason a
+unit is chosen, yet the agent still drops 23 points. The cost is not the priority and not
+the fertilizer spent: it is that **any additional task consumes the leftover units that
+`_logistics` needs.**
+
+That is the third independent measurement of one mechanism. The README already records it
+twice — the Hungarian assignment losing 31-38% because minimising travel scatters idle
+units off the shed, and `IDLE_PREPOSITION` losing 16.4% for walking them somewhere useful.
+Greedy's *unassigned* units clustering next to the shed is load-bearing, because every
+animal and every sack of feed enters the farm through a shed `PICKUP`. Anything that gives
+those units a job costs more than the job is worth.
+
+Combined with the animal chores being 78% of our revenue, this is a coherent picture of a
+**local optimum**: the livestock core and the idle-unit logistics reserve are mutually
+load-bearing, and every attempt to reallocate unit-turns toward the crop-rotation game the
+field plays has now lost — nine of eleven candidates across v0.1.0 and v0.1.1.
+
+**The implication is that this is not a knob problem.** Matching the field's crop rotation
+needs the macro *and* micro layers redesigned together — fewer animals, so fewer chores,
+so the freed unit-turns go to planting and watering, with the priority ladder and the
+logistics reserve re-derived for that mix. Changing one leg at a time will keep measuring
+the ladder rather than the idea, which is exactly what the last eleven A/Bs did.
+`search/cem.py` exists for re-tuning the vector after such a change; it cannot make the
+change.
+
+### v0.1.1 measured result
+
+| opponent | eps | mean cash | win rate | crashes | p95 turn |
+| --- | --- | --- | --- | --- | --- |
+| `opponents/v0_1_0.py` | 30 | $52,691 (opp $52,529) | **56.7%** (17W 13L) | 0 | 0.25 ms |
+| `opponents/v0_0_9.py` | 30 | $53,152 | **80.0%** (24W 6L) | 0 | 0.33 ms |
+| `baseline` | 30 | $71,885 | 100% (30W) | 0 | 0.30 ms |
+| `opponents/adaptive.py` | 30 | $71,761 | 100% (30W) | 0 | 0.30 ms |
+| `mirror` | 30 | $54,360 | 11W 9T 10L | 0 | 0.30 ms |
+
+Reliability criteria all pass. Note the gate is *narrower* than v0.1.0's was — 56.7% is a
+17W-13L edge, which at 30 seeds is not significant on its own; the 80.0% against v0.0.9 is
+the stronger reading. Given that v0.1.0 won its gate 23W-7L and moved the live score by
+nothing, **this should be expected to move the live score by nothing as well.** It is worth
+submitting only as a cheap confirmation that the plateau is architectural, not as a
+candidate for a real gain.
+
+---
+
 ## Results
 
 | version | submitted | change | local gate | live episodes | live mean cash | live W-L | verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | v0.0.8 | 2026-08-10 | behaviour-cloned atomic actions | — | 12 | $2,908 | 3W-8L | reverted, see README |
 | v0.0.9 | 2026-08-11 | CEM macro vector, heuristic restored | $64,351 vs baseline | 10 | $50,957 | 5W-3L | baseline for the work below |
-| v0.1.0 | pending approval | egg engine deleted, pasture role churn fixed, SELL sized from shed | **23W-7L vs v0.0.9** | — | — | — | awaiting submit |
+| v0.1.0 | 2026-08-11 | egg engine deleted, pasture role churn fixed, SELL sized from shed | 23W-7L vs v0.0.9 | 29 | $56,279 | 14W-15L | **passed its gate, moved nothing.** Marginally the best of v0.0.6/7/9/0.1.0, all of which sit at ~$56k and ~48%. Score 586.3, rank #2440/3892. See post-mortem. |
+| v0.1.1 | not submitted | wheat promoted to a real crop target; leftover-land tail switched to wheat | 17W-13L vs v0.1.0, 24W-6L vs v0.0.9 | — | — | — | passes a narrow gate; expected to move the live score by nothing, for the reasons in the v0.1.1 section |

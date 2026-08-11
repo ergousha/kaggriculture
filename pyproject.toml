@@ -25,6 +25,10 @@ package = false
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Vendored third-party code: Rayk Kretzschmar's reference ladder (MIT, see
+# opponents/ladder/LICENSE and NOTICE). Kept byte-identical to the published
+# dataset so a ranking result is reproducible against it -- do not reformat.
+extend-exclude = ["opponents/ladder"]
 
 [tool.ruff.lint]
 select = [
@@ -56,6 +60,7 @@ check_untyped_defs = false
 module = [
     "kaggle.*",
     "kaggle_environments.*",
+    "opponents.ladder.*",
 ]
 ignore_missing_imports = true
 
