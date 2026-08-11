@@ -13,6 +13,9 @@ from search.space import StrategySpace
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT_PATH = os.path.join(PROJECT_ROOT, "main.py")
+# The searchable target. main.py became a route-replay agent in v0.2.0 and carries
+# none of the tunable constants; the heuristic line's frozen head does.
+HEURISTIC_PATH = os.path.join(PROJECT_ROOT, "opponents", "v0_1_1.py")
 
 
 class TestStrategySpace(unittest.TestCase):
@@ -32,11 +35,21 @@ class TestStrategySpace(unittest.TestCase):
         self.assertEqual(len(space.mutate(default_vec, scale=0.1, p_mutate=0.5)), space.dim)
 
     def test_reads_live_agent_constants(self) -> None:
+        """The searchable target is the heuristic agent family, not main.py.
+
+        main.py became a route-replay agent in v0.2.0 and has none of these
+        constants, so pointing this at main.py would assert that the submission is
+        still a heuristic. The search stack is unchanged and still operates on the
+        heuristic line; opponents/v0_1_1.py is its frozen head.
+        """
         space = StrategySpace()
-        live = space.read_from_file(AGENT_PATH)
+        target = HEURISTIC_PATH
+        if not os.path.exists(target):
+            self.skipTest(f"no heuristic agent snapshot at {target}")
+        live = space.read_from_file(target)
         self.assertIn("MAX_HANDS", live)
         # Round-tripping the file's own values must not rewrite them.
-        vec = space.get_file_vector(AGENT_PATH)
+        vec = space.get_file_vector(target)
         self.assertEqual(space.vector_to_dict(vec)["MAX_HANDS"], live["MAX_HANDS"])
 
 

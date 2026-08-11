@@ -10,12 +10,19 @@ same seed pays out completely differently across releases, so a measurement take
 1.32.3 is not comparable to one taken on 1.32.6.
 Python 3.12+.
 
-The agent itself is hand-written and standard library only. There was a neural
-version; it lost to the environment's own starter bot and is documented below as the
-most useful negative result in the repo.
+**v0.2.0 changed architecture.** The submission is now a *route-replay* agent: one
+recorded 719-step action route plus bounded WEED repair, SELL-slot ordering by price
+impact, and hands alignment. It scores **60/60 against the reference ladder** where the
+hand-written agent scored 36/60 and could not beat tier 6 at all. The reason is in
+[docs/experiments.md](docs/experiments.md): above ~$56k this is not a strategy
+competition — every ladder rung above 5, and the current #1, is a fixed plan with a thin
+repair layer. The hand-written two-layer agent is still here as `opponents/v0_1_1.py`
+and `search/` still operates on it; everything below about planners and schedulers
+describes that line, not the current submission.
 
 ```
-main.py                       # THE submission — hand-written, stdlib only, no weights
+main.py                       # THE submission — v0.2.0 route replay, stdlib only
+scripts/build_route_agent.py   # bakes a downloaded episode into a route-replay agent
 local_arena.py                # match runner, metrics, decision logs, A/B + sweep rig
 submit.py                     # pre-flight, submit, poll, history
 search/space.py               # the ~23-number macro vector that is actually searched

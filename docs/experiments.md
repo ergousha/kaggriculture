@@ -648,6 +648,98 @@ candidate for a real gain.
 
 ---
 
+## v0.2.0 — route replay. 36/60 → 60/60 on the ladder.
+
+The ladder gate said our hand-written agent sits between tier 5 and tier 6, and that
+every rung above 5 is a fixed production plan with a thin repair layer. So we built one.
+
+`scripts/build_route_agent.py` bakes a downloaded episode's action stream into a
+submittable agent: the route as base85-of-zlib JSON, plus three runtime layers written
+from the environment's mechanics —
+
+1. **bounded WEED repair.** Weeds are the only per-episode randomness that can silently
+   invalidate a route: a tile the route expects empty becomes a `WEED` and every `PLANT`
+   on it no-ops for the rest of the game. A scripted `PLANT`/`BUILD_*` onto a weed emits
+   `DIG`, replays the intent next step, then shifts that unit's trace by one for 8 steps.
+2. **SELL-slot ordering.** The SELL orders the route already contains are reordered
+   among their own slots by price impact (`quantity × (price_now − price_after)`).
+   Quantities, items and every non-SELL order stay where the route put them.
+3. **hands alignment.** Pad or truncate the hands list to the live hand count; a route
+   recorded with N hands is otherwise invalid on a turn with M.
+
+### Route selection is the whole job, and recorded cash is the wrong criterion
+
+Candidate routes were extracted from 188 downloaded episodes (the 2026-08-10 dump plus
+our own live episodes), then **baked and ranked against ladder tiers 6, 8 and 9** rather
+than trusted on the cash they happened to bank:
+
+| # by cash | team | episode / seat | recorded cash | ladder (inner) | margin |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Ezzzzzekki | 91490781 / 0 | $146,935 | 11/12 | +$22,518 |
+| 2 | Desert Fox88 | 91927561 / 0 | $145,279 | 11/12 | +$23,136 |
+| 3 | Jince | 91759414 / 0 | $141,128 | **12/12** | +$25,381 |
+| **4** | **Dmitry Larko** | **91767673 / 1** | $140,980 | **12/12** | **+$29,777** |
+| 5 | 青烟 | 91490952 / 0 | $140,633 | 9/12 | +$16,841 |
+| 6 | Gould Research | 91582648 / 0 | $139,872 | 10/12 | +$16,956 |
+| 7 | saitamad | 91613045 / 1 | $137,764 | **12/12** | +$25,381 |
+| 8 | THUNDER THUNDER | 91537598 / 1 | $137,003 | 10/12 | +$16,458 |
+
+The ranking is not the cash ranking. The best-banking route is 11/12; the fourth-best
+is 12/12 with the highest margin. Note also that **Jince and saitamad produce
+byte-identical results** — the same shared meta line under two team names, exactly what
+the dataset NOTICE describes.
+
+The three 12/12 routes were then split on an **independent seed set** (seed 9000, 8
+episodes per rung, tiers 6-9). All three went 32/32; Dmitry Larko's carried the highest
+own cash ($104,344 vs $96,943) and the best margin, so that is the route that shipped.
+
+### v0.2.0 measured result
+
+Full ladder, 6 episodes per rung, seats alternated:
+
+| tier | agent | v0.1.1 | **v0.2.0** | v0.2.0 cash | theirs |
+| --- | --- | --- | --- | --- | --- |
+| 0-4 | finn … mateo | 30W-0L | **30W-0L** | $138-155k | $3-15k |
+| 5 | rancher_rita | 6W-0L | **6W-0L** | $125,300 | $16,208 |
+| 6 | broker_bea | **0W-6L** | **6W-0L** | $90,488 | $57,628 |
+| 7 | ledger_lena | **0W-6L** | **6W-0L** | $90,162 | $57,222 |
+| 8 | slotter_silas | **0W-6L** | **6W-0L** | $89,738 | $57,524 |
+| 9 | closer_cleo | **0W-6L** | **6W-0L** | $86,896 | $64,244 |
+| | **overall** | **36/60** | **60/60** | | |
+
+**RUNG: at or above tier 9.** And against our own history: 30W-0L vs both v0.1.1 and
+v0.1.0 at $127,338 and $127,506 mean. Smoke test against `baseline` banks $139,804
+where v0.1.1 banked $55,109. `mirror` is 4W-19T-7L, the expected shape for two identical
+deterministic agents on a shared seed.
+
+Reliability: 0 crashes, 0 timeouts, 0 invalid statuses, p95 turn **0.0 ms** — the route
+lookup is far cheaper than the planner it replaced.
+
+### What this costs, and what it is honest to claim
+
+- **The production plan is not ours.** It is team Dmitry Larko's observable public replay
+  of episode 91767673, and the generated file records episode, team, seat and recorded
+  cash in its own header so the provenance travels with the artifact. The three runtime
+  layers are our implementation of the design published by Kaito Fukami. The dataset
+  NOTICE's position on the shared line is that it "demonstrably belongs to none" of the
+  104 teams playing it and is reconstructible from public replay data by anyone.
+- **It is open-loop, so it is fragile in a way the numbers above do not show.** The
+  ladder opponents are deterministic. Against an opponent that trades very differently,
+  a `BUY` the route depends on can fail and the divergence compounds — that is exactly
+  how the 2026-08-05 $187,844 route collapsed to $392 when we replayed it. The
+  three-layer repair covers weeds and order slots; it does not cover cash divergence.
+  Selection on the ladder is a proxy for robustness, not a proof of it.
+- **The heuristic line is not deleted.** `opponents/v0_1_1.py` is its frozen head and
+  `search/` still operates on it; `search/smoke_test.py` now reads its constants from
+  there rather than from `main.py`.
+- **Two pre-flight changes were needed.** `zlib` was added to `submit.py`'s import
+  allowlist, and the check that required the planner/scheduler classes to be present was
+  removed: it was a proxy for "self-contained" that only described one architecture,
+  while self-containment is already enforced by the allowlist and by loading the file the
+  way the env loads it.
+
+---
+
 ## Results
 
 | version | submitted | change | local gate | live episodes | live mean cash | live W-L | verdict |
@@ -655,4 +747,5 @@ candidate for a real gain.
 | v0.0.8 | 2026-08-10 | behaviour-cloned atomic actions | — | 12 | $2,908 | 3W-8L | reverted, see README |
 | v0.0.9 | 2026-08-11 | CEM macro vector, heuristic restored | $64,351 vs baseline | 10 | $50,957 | 5W-3L | baseline for the work below |
 | v0.1.0 | 2026-08-11 | egg engine deleted, pasture role churn fixed, SELL sized from shed | 23W-7L vs v0.0.9 | 29 | $56,279 | 14W-15L | **passed its gate, moved nothing.** Marginally the best of v0.0.6/7/9/0.1.0, all of which sit at ~$56k and ~48%. Score 586.3, rank #2440/3892. See post-mortem. |
-| v0.1.1 | not submitted | wheat promoted to a real crop target; leftover-land tail switched to wheat | 17W-13L vs v0.1.0, 24W-6L vs v0.0.9 | — | — | — | passes a narrow gate; expected to move the live score by nothing, for the reasons in the v0.1.1 section |
+| v0.1.1 | PR #10 | wheat promoted to a real crop target; leftover-land tail switched to wheat | 17W-13L vs v0.1.0, 24W-6L vs v0.0.9; **ladder 36/60, between tier 5 and 6** | — | — | — | last of the heuristic line; frozen at `opponents/v0_1_1.py` |
+| **v0.2.0** | pending | **route replay** — Dmitry Larko ep 91767673 seat 1, plus WEED repair, SELL-slot ordering, hands alignment | **ladder 60/60, at or above tier 9**; 30W-0L vs v0.1.1 and v0.1.0; $139,804 vs baseline | — | — | — | awaiting submit |
