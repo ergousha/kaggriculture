@@ -13,6 +13,3 @@ __pycache__/
 
 # Notebooks pulled for reference
 reference/
-
-# Offline RL Weights
-bc_weights.npz

@@ -6,6 +6,7 @@ and task priorities in main.py.
 
 from __future__ import annotations
 
+import ast
 import copy
 import random
 import re
@@ -107,6 +108,33 @@ class StrategySpace:
                 norm_val = 2.0 * (float(val) - p.min_val) / (p.max_val - p.min_val) - 1.0
             vec.append(max(-1.0, min(1.0, norm_val)))
         return vec
+
+    def read_from_file(self, src_path: str) -> dict[str, Any]:
+        """Read the live value of every tunable out of an agent file.
+
+        `ParamDef.default` is the midpoint of a search range, not what the agent
+        currently holds, so seeding a search from the defaults silently rewrites
+        the agent before the first evaluation.
+        """
+        with open(src_path) as f:
+            src = f.read()
+
+        found: dict[str, Any] = {}
+        for p in self.defs:
+            m = re.search(rf"(?m)^{re.escape(p.name)}\s*=\s*([^\n#]+)", src)
+            if not m:
+                continue
+            try:
+                value = ast.literal_eval(m.group(1).strip())
+            except (ValueError, SyntaxError):
+                continue
+            if isinstance(value, int | float | bool):
+                found[p.name] = value
+        return found
+
+    def get_file_vector(self, src_path: str) -> list[float]:
+        """Normalized vector describing an agent file exactly as it stands."""
+        return self.dict_to_vector(self.read_from_file(src_path))
 
     def mutate(
         self,
