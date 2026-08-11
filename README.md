@@ -4,7 +4,10 @@ A two-tier agent for the Kaggle [Kaggriculture](https://www.kaggle.com/competiti
 competition, plus a local arena for measuring it, a macro-strategy search, and a
 submission pipeline.
 
-Verified against **kaggle-environments 1.32.3** (kaggriculture spec version `0.1.0`).
+Verified against **kaggle-environments 1.32.6** (kaggriculture spec version `0.1.0`), which
+is what the competition runs. The engine version is load-bearing: the same game on the
+same seed pays out completely differently across releases, so a measurement taken on
+1.32.3 is not comparable to one taken on 1.32.6.
 Python 3.12+.
 
 The agent itself is hand-written and standard library only. There was a neural
@@ -24,6 +27,8 @@ search/smoke_test.py          # unit tests for the search stack
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
 opponents/vX_Y_Z.py           # every submitted version, kept as a sparring partner
 scripts/mine_daily.py         # mines Kaggle's daily episode dumps into strategy fingerprints
+scripts/rank_ladder.py        # ranks the agent against the reference ladder — THE gate
+opponents/ladder/             # Rayk Kretzschmar's tier 0-5 reference agents (MIT)
 scripts/probe_agent.py        # schema probe; writes logs/probe_schema.json
 scripts/sync_opponent.py      # pre-commit hook that versions main.py into opponents/
 kaggle_credentials.example.py # copy to kaggle_credentials.py (gitignored)
@@ -44,6 +49,8 @@ is used by the tooling, not by the agent.
 
 ```bash
 uv run python scripts/probe_agent.py                                    # confirm the schema
+uv run python scripts/rank_ladder.py --fetch                            # get the ladder
+uv run python scripts/rank_ladder.py --episodes 6                       # which rung are we on
 uv run python scripts/mine_daily.py                                     # what the frontier does
 uv run python local_arena.py --agent main.py --opponent baseline --episodes 30
 uv run python local_arena.py --agent main.py --opponent opponents/adaptive.py --episodes 30
