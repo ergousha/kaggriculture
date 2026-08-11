@@ -60,7 +60,6 @@ check_untyped_defs = false
 module = [
     "kaggle.*",
     "kaggle_environments.*",
-    "opponents.ladder.*",
 ]
 ignore_missing_imports = true
 
