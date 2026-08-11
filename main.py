@@ -25,6 +25,21 @@ Capital is ring-fenced for the egg engine before land or seed can claim it, and
 everything harvested is sold on sight -- withholding to protect a price measured
 strictly worse, and unsold stock scores nothing.
 
+WARNING: the paragraph above describes what this file does, and it is built on a
+falsified model of the market. Mining 69 real Kaggle episodes (138 player-seats,
+`scripts/mine_daily.py`) shows the market starts at 10,000 inventory per product
+and town demand drains it, so prices RISE rather than collapse -- median MILK
+160 -> 329, STRAWBERRY 120 -> 294 -- and melon is the ONLY product that ends
+below its peak. Top-decile revenue is MILK 32.5%, STRAWBERRY 18.7%, WOOL 16.2%,
+and EGG 0.6%. The cumulative-pot table those claims came from was evaluated at a
+starting inventory the game never visits. Concretely wrong here: the egg engine
+is a rounding error yet `engine_claim` gives it the first claim on capital; wool
+and milk are the two largest revenue lines, not small capped pots; buying wheat
+beats growing it (the frontier buys ~592/episode on ~1 owned tile); and
+FERTILIZE is never emitted even though fertilizer sells for 13.2% of our revenue
+and the frontier applies it to strawberry instead. The behaviour is unchanged
+pending a measured rework -- see README.md "What the leaderboard data says".
+
 Reading order: FLAGS and the tunable block record what is measured vs assumed;
 StrategicPlanner is the macro layer; SpatialScheduler the per-turn one.
 
@@ -45,7 +60,7 @@ import os
 import time
 import traceback
 
-AGENT_VERSION = "0.0.9"
+AGENT_VERSION = "0.1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +240,20 @@ FLAGS = {
     "EXPAND_LAND": True,
     "PREMIUM_LIVESTOCK": True,
     "ANIMAL_CARE": True,
+    # OFF on measurement, v0.1.0. Mined from 150 sampled episodes of the
+    # 2026-08-10 daily dump (300 seats): the entire field, every cohort, runs
+    # ZERO coops and ZERO geese, and egg is 0.0% of top-decile revenue. Our own
+    # 10 live v0.0.9 seats ended with 14.7 coops holding 0.3 geese -- 14.4 of 50
+    # tiles were EMPTY coops, 29% of the farm doing nothing, plus the
+    # `BUILD_COOP` ops to raise them. A goose is $300 for ~25 eggs at $50-62
+    # against a cow at $400 for ~11-22 milk at $169-222, so it loses 3-5x per
+    # structure AND occupies a tile that could carry a crop. Switchable so the
+    # result stays reproducible; see docs/experiments.md.
+    "EGG_ENGINE": False,
+    # OFF on measurement, v0.1.0: $13,760 (0W-30L) as a flat price floor and
+    # $45,144 vs $58,635 (5W-25L) as a per-order slippage cap. See the
+    # SELL_MAX_SLIPPAGE block for why the premise was wrong.
+    "SELL_RATE_LIMIT": False,
     # OFF on measurement: -31.3% vs baseline and -40.4% vs adaptive over 30
     # paired seeds (p~0.0, better on 3/30 both times). See
     # SpatialScheduler._assign_optimal for why an exactly optimal matching
@@ -242,6 +271,12 @@ FERRY_MAX_UNITS = 6
 ANIMAL_BACKLOG_CAP = 8
 
 # Land. $1k/$2k/$4k.
+# TUNED. Lowering the buffer to 400 and LAND_LAST_DAY to 22 was tried in v0.1.0 on
+# the reasoning that the field ends on 75 owned tiles to our 50, and it is wrong:
+# it bought the whole 100-tile board (96.9 owned) for ~$7k and left us without the
+# labour to work it. In the field data `corr(cash, owned_tiles)` is -0.139 and
+# `corr(cash, land_buys)` is -0.139 -- land is mildly NEGATIVE, not a target. The
+# 75-tile figure is what cash-sorted cohorts happen to hold, not what earns.
 LAND_CASH_BUFFER = 1961.9271
 LAND_EXPAND_SLACK = 2
 LAND_RICH_BUFFER = 3000
@@ -251,6 +286,13 @@ LAND_LAST_DAY = 16
 GOOSE_MIN_DAYS_LEFT = 18
 SHEEP_MIN_DAYS_LEFT = 10
 COW_MIN_DAYS_LEFT = 11
+# MAX_SHEEP stays at 6. Cutting to 4 was tried on the reasoning that the field
+# runs 4.1 sheep and WOOL's above-target curve is `sq`, and it loses where it
+# counts: 30 paired seeds against v0.0.9 give 15W-15L at MAX_SHEEP=4 against
+# 23W-7L at 6. The mean prefers 4 ($56,531 vs $54,383) and the WIN RATE prefers 6,
+# which is the objective -- the competition ranks pairwise, so a $1 win and a
+# $50,000 win score the same. `local_arena --sweep` reports its "best" by mean;
+# do not read that line as the answer.
 MAX_SHEEP = 6
 MAX_COWS = 9
 PREMIUM_MIN_TILES = 12
@@ -262,12 +304,52 @@ WHEAT_MAX_BUY_PRICE = 70
 FEED_GATE_MAX = 50
 WHEAT_CARRY_PER_UNIT = 6
 
-# Strawberry & Melon targets (v0.0.6 leaderboard insight: balanced Melon windfall + Strawberry multi-harvest).
+# Strawberry & Melon targets.
+# MELON stays at 9. Cutting it to 3 was tried in v0.1.0 on the reasoning that it
+# is 1.3% of top-decile revenue and ends at $25, and it measured 0W-30L against
+# v0.0.9 (mean $43,059 vs $58,635). The field's low melon *share* is not evidence
+# that melon is unprofitable: the field sells 30.6 melon for $1,410, so the share
+# is low because everything else is bigger, not because melon loses money. Our 9
+# tiles were earning real cash and the freed land went to strawberry, which needs
+# 16 days from planting before it returns anything.
 STRAWBERRY_TILE_TARGET = 41
 STRAWBERRY_LAND_FRACTION = 0.4058
 MELON_TILE_TARGET = 9
 MELON_LAND_FRACTION = 0.4866
 MELON_LAST_PLANT_DAY = 15
+
+# Sale-rate limiting, v0.1.0. THE finding from the 2026-08-10 field: the top
+# decile and the bottom quartile sell almost identical strawberry volume (229.1 vs
+# 224.5 units) for 2.9x the revenue ($42,042 vs $14,381) -- $184/unit against
+# $64/unit. Volume is not what separates them; realised price is.
+#
+# The mechanism is the curve. STRAWBERRY is `sqrt` below I0 (amp 8.4) and `linear`
+# above it, so $184/unit means selling at inventory ~9942, i.e. into scarcity,
+# while $64/unit means pushing ~29 units past I0. Four of the eight shop types buy
+# strawberry, so the town drains it faster than anything else; selling at or under
+# that drain rate keeps the price above base indefinitely, and dumping outruns it.
+#
+# Sale-rate limiting. OFF on measurement -- see FLAGS["SELL_RATE_LIMIT"]. Kept
+# because the reasoning that motivated it is a trap worth documenting.
+#
+# The 2026-08-10 field shows the top decile realising $192/unit on strawberry
+# against the bottom quartile's $62 at *identical* volume (229.1 vs 224.5 units),
+# which reads as an obvious call to stop dumping. Two implementations were tried:
+#   * flat floor at 1.0 x base: price only reaches base at inventory <= I0, so it
+#     permitted ~1 unit/turn, lost 305 units to shed overflow, scored $13,760
+#     (0W-30L vs v0.0.9);
+#   * cap each order where its marginal price slipped 10% below its first unit:
+#     $45,144 vs $58,635 (5W-25L).
+#
+# The premise was wrong. Within a single episode the two seats' strawberry $/unit
+# differ by a mean of $7.20; between episodes the stdev is $56.80 (range $25-$227),
+# and the spread is explained by how many strawberry-buying shops the RNG happened
+# to unlock (1 shop -> $37/unit, 6 shops -> $190/unit). Shops are drawn with
+# replacement every `townShopUnlockInterval` days, so realised price is mostly an
+# episode-level dice roll shared by both players. There was no restraint to learn.
+SELL_MAX_SLIPPAGE = 0.10
+SELL_LIQUIDATE_DAYS = 2
+SHED_PRESSURE = 70
 
 # Layer-B assignment. Only the top-K tasks by priority can ever be reached by
 # <= MAX_HANDS+1 units in one turn, so the matrix is truncated to keep the
@@ -350,6 +432,32 @@ class MarketAnalyzer:
             amp = float(p["above_target"]) * base / _shape(f, t)
             price = base - amp * _shape(f, inv - i0)
         return float(max(PRICE_FLOOR, round(price)))
+
+    def units_sellable_above(self, item, floor, cap=200):
+        """How many units clear at >= `floor`, walking the curve the way SELL does.
+
+        `_commit_unit` sells one unit at a time and re-quotes after each, raising
+        market inventory by one whenever the unit cleared above the $1 floor. So
+        the count is a walk, not a division: the Nth unit of an order is priced at
+        `inventory + N - 1`.
+        """
+        p = MARKET_PARAMS.get(item)
+        if p is None:
+            return 0
+        try:
+            inv = int(self.inventory.get(item, p["I0"]))
+        except (ValueError, TypeError):
+            return 0
+        n = 0
+        while n < cap:
+            if self.price_at(item, inv + n) < floor:
+                break
+            n += 1
+        return n
+
+    def slippage_floor(self, item, slippage):
+        """The price at which an order has moved the market `slippage` against us."""
+        return self.price(item) * (1.0 - float(slippage))
 
     def price(self, item):
         """Current sell price (what SELL pays for the next unit)."""
@@ -512,6 +620,25 @@ class StrategicPlanner:
                 usable.append((x, y))
         usable.sort(key=lambda p: (_shed_distance(p, board), p[1], p[0]))
 
+        # Animal roles are pinned to tiles that ALREADY carry a structure, before
+        # the nearest-shed order is consulted.
+        #
+        # Without this the allocation churns under land expansion. Roles are
+        # recomputed every turn from `usable` sorted by shed distance, and
+        # unlocking a quadrant inserts tiles that sort *ahead* of ones already
+        # holding a pasture. The first `n_sheep + n_cows` slots then shift onto new
+        # ground: the old pasture keeps standing (and keeps its animal), the new
+        # tile reads as a vacant animal role, and `BUILD_PASTURE` raises another
+        # one. Measured on v0.1.0 with the land buffer lowered: 23.8 pastures built
+        # for 13 animals, i.e. ~11 empty pastures plus their build ops -- the same
+        # failure the empty coops were, relocated. Cheap to prevent, invisible
+        # without a fingerprint of the finished farm.
+        def _has_structure(p):
+            tile = tiles[p[1]][p[0]]
+            return isinstance(tile, dict) and tile.get("kind") in ("COOP", "PASTURE")
+
+        usable.sort(key=lambda p: 0 if _has_structure(p) else 1)
+
         n_animals_existing = _count_animals(farm)
 
         # Dynamic ROI valuation, Opponent market pressure, and Leaderboard Meta Intelligence
@@ -560,11 +687,18 @@ class StrategicPlanner:
         melon_n = min(melon_target, int(rem_2 * MELON_LAND_FRACTION))
         rest = max(0, rem_2 - melon_n)
 
-        # Coops: just-in-time coops for geese if pasture is satisfied
-        affordable = int(cash) // ANIMALS["GOOSE"]["cost"]
-        coop_cap = n_animals_existing + ANIMAL_BACKLOG_CAP + affordable
-        coop_n = round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL))
-        coop_n = max(0, min(rest, coop_n, coop_cap))
+        # Coops: just-in-time coops for geese if pasture is satisfied.
+        if FLAGS["EGG_ENGINE"]:
+            affordable = int(cash) // ANIMALS["GOOSE"]["cost"]
+            coop_cap = n_animals_existing + ANIMAL_BACKLOG_CAP + affordable
+            coop_n = round(rest / (1.0 + WHEAT_TILES_PER_ANIMAL))
+            coop_n = max(0, min(rest, coop_n, coop_cap))
+        else:
+            # This line was claiming ~68% of every tile left after strawberry and
+            # melon (`rest / 1.478`), which is how 29% of the farm ended up as
+            # empty coops. With the egg engine off, `rest` falls through to wheat
+            # and then to the strawberry/wheat tail below.
+            coop_n = 0
 
         wheat_n = max(3, math.ceil((n_sheep + n_cows + coop_n) * WHEAT_TILES_PER_ANIMAL))
         wheat_n = min(rest, wheat_n)
@@ -615,8 +749,12 @@ class StrategicPlanner:
         # engine is ring-fenced BEFORE land or cash-crop seeds can claim it.
         # Without this, day 0 spent $1,000 on land and ~$800 on carrot seed, the
         # flock never got built, and cash sat at ~$0 from day 5 to day 22.
+        # v0.1.0: with FLAGS["EGG_ENGINE"] off there is no goose claim, so land and
+        # seed draw on full cash. The ring-fence was giving first call on capital to
+        # the game's weakest revenue line (0.0% of top-decile revenue) and is what
+        # starved land expansion down to 1.0 plot against the field's 2.0.
         engine_claim = 0.0
-        if days_left >= GOOSE_MIN_DAYS_LEFT:
+        if FLAGS["EGG_ENGINE"] and days_left >= GOOSE_MIN_DAYS_LEFT:
             vacant_coops = _vacant_structures(farm, "COOP", self.roles, "GOOSE")
             pending = int(shed.get("GOOSE", 0) or 0) + _carried_total(private, "GOOSE")
             claim_units = max(0, min(vacant_coops - pending, ANIMAL_BACKLOG_CAP))
@@ -634,10 +772,13 @@ class StrategicPlanner:
                 # Expand only once the land we already hold is saturated. Land is
                 # not the early constraint -- cash is. Buying NE on day 0 spent
                 # a third of the opening bank on tiles we had no birds for.
+                # Counts unstocked animal roles of any kind. This used to look at
+                # "COOP" alone, which with the egg engine off is always 0 and would
+                # have made the saturation gate vacuous.
                 unstocked = sum(
                     1
                     for (rx, ry), r in self.roles.items()
-                    if r == "COOP"
+                    if r in ("COOP", "PASTURE_SHEEP", "PASTURE_COW")
                     and not (
                         isinstance(farm["tiles"][ry][rx], dict)
                         and farm["tiles"][ry][rx].get("animal")
@@ -683,6 +824,13 @@ class StrategicPlanner:
         #    price never recovers enough for the withheld stock to clear, and stock
         #    left in the shed at the end scores nothing. Selling on sight also keeps
         #    the shed under its 100-item cap, past which harvests are discarded.
+        # Rate-limited by the curve: see SELL_FLOOR_FRACTION. `liquidate` and
+        # `shed_pressure` are the two escapes -- unsold stock scores $0, and a shed
+        # at 100 discards every further deposit, including the harvest that would
+        # have been the next sale.
+        liquidate = days_left <= SELL_LIQUIDATE_DAYS
+        shed_total = sum(int(v or 0) for v in shed.values())
+        shed_pressure = shed_total >= SHED_PRESSURE
         sells = []
         for item in (
             "EGG",
@@ -694,9 +842,26 @@ class StrategicPlanner:
             "TOMATO",
             "CARROT",
         ):
-            held = int(shed.get(item, 0) or 0) + _carried_adjacent_to_shed(farm, private, item)
-            if held > 0:
-                sells.append((market.price(item) * held, item, held))
+            # Shed only. `_commit_unit` fills a SELL exclusively from
+            # `private["shed"]` and aborts the order the instant it runs dry --
+            # carried inventory is never reachable by a market order, whatever tile
+            # the unit is standing on. Sizing orders as shed + carried made 73.2%
+            # of our ordered SELL volume unfillable (the field's figure is 28.6%),
+            # and against `maxMarketOrdersPerTurn = 10` a slot spent on volume that
+            # cannot clear is a sale that did not happen.
+            held = int(shed.get(item, 0) or 0)
+            if held <= 0:
+                continue
+            n = held
+            if FLAGS["SELL_RATE_LIMIT"] and not (liquidate or shed_pressure):
+                allowed = market.units_sellable_above(
+                    item, market.slippage_floor(item, SELL_MAX_SLIPPAGE)
+                )
+                n = min(held, max(1, allowed))
+            if n <= 0:
+                continue
+            sells.append((market.price(item) * n, item, n))
+
         # Highest-value sales first so the 10-order cap never starves the big one.
         sells.sort(reverse=True)
         for _value, item, n in sells:
@@ -728,6 +893,8 @@ class StrategicPlanner:
             ("GOOSE", None, GOOSE_MIN_DAYS_LEFT),
         ):
             if days_left < min_days:
+                continue
+            if animal == "GOOSE" and not FLAGS["EGG_ENGINE"]:
                 continue
             if animal != "GOOSE" and not FLAGS["PREMIUM_LIVESTOCK"]:
                 continue
