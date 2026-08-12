@@ -360,7 +360,7 @@ def _rank_sells(obs, action):
 
 def _remaining_plants(slot, step, active):
     crops = []
-    
+
     if slot in active:
         entry = active[slot]
         start = entry["start"]
@@ -368,7 +368,7 @@ def _remaining_plants(slot, step, active):
     else:
         start = -999
         intended = None
-        
+
     for T in range(step, 720):
         age = T - start
         if age == 0:
@@ -379,10 +379,10 @@ def _remaining_plants(slot, step, active):
             act = _unit_from_route(T - 1, slot)
         else:
             act = _unit_from_route(T, slot)
-            
+
         if isinstance(act, list) and act and act[0] == "PLANT" and len(act) > 1:
             crops.append(act[1])
-            
+
     return crops
 
 
@@ -390,36 +390,37 @@ def _trim_excess_seeds(obs, action, step):
     seat = _seat(obs)
     state = _REPAIR.get(seat, {})
     active = state.get("active", {})
-    
+
     market = action.get("market") or []
-    if not market: return action
-    
+    if not market:
+        return action
+
     needed = {}
     for slot in range(10):
         for crop in _remaining_plants(slot, step, active):
             needed[crop] = needed.get(crop, 0) + 1
-            
+
     private = _get(obs, "private", {})
     seeds = dict(_get(private, "seeds", {}) or {})
-    
+
     new_market = []
     for order in market:
         if isinstance(order, list) and order and order[0] == "BUY_SEED" and len(order) > 1:
             crop = order[1]
             qty = int(order[2]) if len(order) > 2 else 1
-            
+
             have = int(seeds.get(crop, 0))
             need = needed.get(crop, 0)
-            
+
             if have >= need:
                 continue
-                
+
             deficit = need - have
             if qty > deficit:
                 qty = deficit
-                
+
             seeds[crop] = have + qty
-            
+
             new_order = list(order)
             if len(new_order) > 2:
                 new_order[2] = qty
@@ -428,7 +429,7 @@ def _trim_excess_seeds(obs, action, step):
             new_market.append(new_order)
         else:
             new_market.append(order)
-            
+
     action["market"] = new_market
     return action
 
