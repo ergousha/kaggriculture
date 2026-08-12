@@ -32,7 +32,7 @@ import json
 import math
 import zlib
 
-AGENT_VERSION = "route-1"
+AGENT_VERSION = "0.2.1"
 
 # base85 of zlib of the JSON route. Chunked so `ruff format` is stable on the
 # generated file -- one multi-kilobyte literal gets rewrapped on every run.
