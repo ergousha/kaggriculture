@@ -68,6 +68,7 @@ import random
 import statistics
 import sys
 import zipfile
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
@@ -136,7 +137,7 @@ PRICE_TRACKED = ["WHEAT", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "CARROT"
 # quantity x the quoted price.
 MARKET_I0 = 10_000
 PRICE_FLOOR = 1.0
-MARKET_PARAMS = {
+MARKET_PARAMS: dict[str, dict[str, Any]] = {
     "WHEAT": {"base": 25, "T": 400, "below": ("sqrt", 0.80), "above": ("log", 0.20)},
     "CARROT": {"base": 35, "T": 450, "below": ("log", 0.20), "above": ("sqrt", 0.70)},
     "TOMATO": {"base": 60, "T": 200, "below": ("linear", 0.40), "above": ("sqrt", 0.60)},
@@ -257,7 +258,7 @@ def load_episode(path: str) -> dict | None:
 
 def _tile_composition(farm: dict) -> dict:
     """Owned tiles, crop tiles, animals and fertilizer coverage from a final farm."""
-    comp = {
+    comp: dict[str, Any] = {
         "owned_tiles": 0,
         "fertilized_tiles": 0,
         "coops": 0,
@@ -296,13 +297,13 @@ def fingerprint(data: dict, source: str) -> list[dict]:
     teams = info.get("TeamNames") or []
     n_seats = min(len(steps[0]), max(2, len(rewards)))
 
-    rev = [collections.Counter() for _ in range(n_seats)]
-    sold = [collections.Counter() for _ in range(n_seats)]
-    bought = [collections.Counter() for _ in range(n_seats)]
-    seeds = [collections.Counter() for _ in range(n_seats)]
-    animals = [collections.Counter() for _ in range(n_seats)]
-    ops = [collections.Counter() for _ in range(n_seats)]
-    unfillable = [collections.Counter() for _ in range(n_seats)]
+    rev: list[dict[str, float]] = [collections.defaultdict(float) for _ in range(n_seats)]
+    sold: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
+    bought: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
+    seeds: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
+    animals: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
+    ops: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
+    unfillable: list[collections.Counter[str]] = [collections.Counter() for _ in range(n_seats)]
     hires = [0] * n_seats
     land = [0] * n_seats
 
