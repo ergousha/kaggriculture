@@ -151,6 +151,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=720)
     parser.add_argument("--tiers", default="0-9", help="e.g. 0-5 or 4,5,6")
     parser.add_argument("--fetch", action="store_true", help="download the dataset and exit")
+    parser.add_argument(
+        "--require-perfect", action="store_true", help="exit with code 1 if not 100% win rate"
+    )
     args = parser.parse_args()
 
     if args.fetch:
@@ -235,6 +238,8 @@ def main() -> None:
     print(f"overall {total_w}/{total_g} wins across the ladder")
     if any(r["errors"] for r in results):
         print("WARNING: some matches errored; treat those rungs as unmeasured")
+        if args.require_perfect:
+            sys.exit(1)
 
     league = load_reference_league()
     if league and highest_beaten is not None and lowest_lost is not None:
@@ -253,6 +258,10 @@ def main() -> None:
                 f"reference league for that step: {row['agent_a']} vs {row['agent_b']} "
                 f"{row['wins_a']}-{row['wins_b']}, mean margin {float(row['mean_margin_a']):+,.0f}"
             )
+
+    if args.require_perfect and total_w != total_g:
+        print("ERROR: Agent did not achieve a 100% win rate across the ladder.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

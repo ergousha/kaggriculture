@@ -38,6 +38,9 @@ scripts/rank_ladder.py        # ranks the agent against the reference ladder —
 opponents/ladder/             # Rayk Kretzschmar's tier 0-5 reference agents (MIT)
 scripts/probe_agent.py        # schema probe; writes logs/probe_schema.json
 scripts/sync_opponent.py      # pre-commit hook that versions main.py into opponents/
+scripts/download_yesterday.sh # bash script to download the latest episode dumps automatically
+scripts/analyse_routes.py     # pandas analysis script to classify static vs dynamic routes
+scripts/compare_routes.py     # compares unit-op distribution between two replay JSONs or agents
 kaggle_credentials.example.py # copy to kaggle_credentials.py (gitignored)
 logs/                         # replays, decision logs, submission history, search output
 ```
