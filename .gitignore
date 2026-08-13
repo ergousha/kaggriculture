@@ -5,6 +5,11 @@ kaggle_credentials.py
 logs/
 replays/
 
+# Route-mining pipeline artifacts. candidates.jsonl carries ~3k compressed 719-step
+# traces (~45 MB), well past the 1000 kB pre-commit limit; it is reproducible from
+# replays/ via mine_replays.py.
+candidates.jsonl
+
 # Local environment
 .venv/
 __pycache__/
