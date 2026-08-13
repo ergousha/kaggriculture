@@ -32,3 +32,9 @@ repos:
         language: system
         files: ^main\.py$
         pass_filenames: false
+      - id: check-ladder
+        name: Check 100% Win Rate on Ladder
+        entry: uv run python scripts/rank_ladder.py --episodes 1 --require-perfect
+        language: system
+        files: ^main\.py$
+        pass_filenames: false
