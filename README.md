@@ -542,6 +542,140 @@ of them is fixed yet.
 
 ---
 
+## Robust route mining (v0.2.5)
+
+The route-replay agent scores well and varies wildly. v0.2.4 replays one fixed 719-step
+route; on a favourable seed it banks $156k, on an unfavourable one it collapses, because
+shops respawn every 3 days and production decisions pay off 8–12 days later. By the time
+the market tells you which route was right, it is far too late to change it. Reacting
+mid-game would cost the throughput that makes the route-replay approach work at all.
+
+So the stochasticity is handled offline instead of at runtime: mine every route the
+leaderboard has already played, stress-test each one against thousands of simulated
+markets, and ship the route with the best **worst case** rather than the best average.
+
+Four scripts, run in order:
+
+```bash
+uv run python mine_replays.py --workers 12          # -> candidates.jsonl
+uv run python simulate_candidates.py --workers 12   # -> logs/simulation_results.jsonl
+uv run python rank_cvar.py --workers 12             # -> logs/cvar_report.json
+uv run python encode_submission.py --write-agent main.py
+```
+
+`encode_submission.py` refuses to emit unless Phase 3 recorded that the winner beat
+v0.2.4 on held-out CVaR₅ (override with `--allow-unvalidated`). The winning route is
+live in `main.py` as of v0.2.5; `opponents/v0_2_5.py` is its frozen snapshot.
+
+`simulate_candidates.py` supports `--resume`; the full sieve is ~4.5 h on 12 workers.
+
+### The metric is CVaR₅, not the 5th percentile
+
+**CVaR₅ = the mean of the worst 5% of outcomes** (25 of 500), not the score *at* the 5th
+percentile. The percentile tells you where the boundary is; CVaR tells you how bad things
+are past it. That difference is the whole point — it separates "bad seeds earn $80k" from
+"bad seeds earn $20k", which a percentile cannot. Selection is on CVaR₅ alone; mean,
+median, p5, min and max are reported for context only.
+
+### Method
+
+- **Threshold $85k, deliberately modest.** A route that banked $110k did so partly on a
+  lucky seed, so a high threshold selects *for* luck-dependence — the opposite of the
+  goal. See the finding below; this was not a hedge, it decided the outcome.
+- **Fidelity gate.** Every candidate's original episode is reconstructed closed-loop on
+  its recovered seed (see [docs/replay_schema.md](docs/replay_schema.md)) with both seats
+  replaying verbatim, and must reproduce the recorded rewards **exactly**. This catches
+  extraction and format bugs before they poison everything downstream.
+- **Common random numbers, mandatory.** Every candidate is scored on the *identical* seed
+  list. Without paired seeds a CVaR comparison between two routes is mostly a comparison
+  of their seed luck. The sets are nested — screen (12) ⊂ mid (50) ⊂ final (500) — so each
+  stage reuses the episodes its predecessor paid for; the holdout (500) is disjoint.
+- **Three-stage sieve.** Deduplication recovers only ~1.4% of this corpus, so the pool
+  stays near 3,100 routes and a flat 50-seed screen would cost ~13 h. Screening all
+  candidates on 12 seeds, then the top 400 on 50, then the top 20 on 500 costs ~4.5 h for
+  the same final resolution.
+- **What is scored is what ships:** the route baked into the real agent template, so the
+  three runtime layers (WEED repair, SELL-slot ordering, hands alignment) are in play.
+
+### Results
+
+3,413 replays (100 GB) → 1,805 files with a qualifying seat → **3,089 unique candidates,
+all 3,089 passing the fidelity gate exactly, zero exclusions**. Then 61,268 paired-seed
+episodes with zero crashes, timeouts, invalid statuses or harness errors.
+
+| | CVaR₅ | mean | median | p5 | min | max |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Winner** (Hamed Seyed-allaei, ep 92449798 seat 0) | **$44,655** | $87,997 | $85,209 | $50,881 | $34,522 | $154,606 |
+| v0.2.4 baseline | $43,045 | $84,914 | $81,406 | $48,563 | $31,938 | $148,251 |
+
+Held-out, 500 fresh seeds disjoint from every seed used in selection. Delta **+$1,610**
+CVaR₅; the winner is ahead on 275/500 paired seeds, p≈0.014.
+
+### Finding: recorded cash does not predict robustness
+
+Across the 20 finalists, `correlation(recorded_cash, CVaR₅) = **-0.05**` — essentially
+zero, and slightly negative. The most robust route in the entire 100 GB corpus banked
+**$89,802** in its own episode. Finalist #4 banked $85,542, barely clearing the threshold.
+**Filtering the pool at an "elite" $110k would have discarded the winner.**
+
+The mechanism is visible directly in the corpus: one byte-identical 719-step trace appears
+twice, banking **$96,946** on one seed and **$131,597** on another — a 36% spread from
+seed alone. Ranking mined routes by the cash they happened to bank is ranking their luck.
+
+A corollary, stated because it is a real limit: the $85k threshold is *itself* seed-noisy,
+so it drops robust routes that drew a bad seed. The pool is a lower bound on what the
+corpus contains. Fixing that would mean simulating everything.
+
+### Finding: the winner's curse is bigger than the win
+
+The selected route's CVaR₅ was $48,295 on the evaluation seeds and **$44,655** on the
+held-out set — a **$3,640 shrinkage, larger than its entire $1,610 margin** over v0.2.4.
+Picking the maximum of ~3,100 noisy estimates overfits the seed set it was chosen on.
+Without the held-out re-run this section would be claiming a ~$5k gain that does not
+exist. Any future route selection must re-validate on fresh seeds; the ranking table is
+not the result.
+
+### Caveats
+
+- **The gain is modest and may not transfer.** +3.7% CVaR₅ is statistically significant
+  and practically small. Four consecutive versions have won their local paired-seed gates
+  and moved the live Kaggle score by nothing (see "Results" and
+  [docs/experiments.md](docs/experiments.md)). This is well inside that range.
+- **It does not fix the tail.** The winner's minimum is still $34,522 and its p5 $50,881.
+  Mining found a more robust route, not a robust one. For scale, local self-play over the
+  500 held-out seeds puts v0.2.4 at mean $84,914 with a worst case of **$31,938** — a
+  deeper tail than the ~$73k–$79k the live replays show under adverse shop draws, but
+  measured against a mirror rather than the real field, so the two are not directly
+  comparable. Either way, mining did not close it.
+- **The baseline is self-play.** The opponent is held constant at v0.2.4 for every run,
+  which is what CRN requires, but that makes the baseline row the only *mirror* match:
+  two identical routes bid for the same shared market inventory at the same instants.
+  On the ladder we never face ourselves. Treat it as a self-play reference, not a field
+  estimate — the same caveat that applies to every mirror A/B in this repo.
+- **Seed distribution is an assumption.** Local seeds are sequential integers; Kaggle
+  assigns each episode a seed we cannot observe or reproduce. All market randomness comes
+  from `random.Random((seed * 1_000_003) ^ day)`, so these seeds do span the shop-draw
+  space, but nothing here can verify the distributions match. `--seed-mode random31`
+  samples the same 31-bit range the engine's own fallback uses, as a second read.
+- **Finalist concentration.** 18 of the 20 finalists came from one team. They are
+  genuinely distinct routes (24–72% of steps differ, no identical pairs) and the winner
+  is from a separate lineage, but a shared strategy class could still share a failure mode
+  the held-out set would not detect.
+
+### Seat symmetry
+
+A trace mined from seat 1 replays correctly from seat 0. Verified twice: swapping both
+seats' traces swapped their scores exactly (`[54528, 52963]` → `[52963, 54528]`), and
+episode 91605633 was a natural mirror in which both seats played a byte-identical trace
+and both scored exactly $155,241. So mining need not preserve seat assignment — though
+`candidates.jsonl` records it anyway, since you need it to pair a trace with its reward.
+
+This does **not** mean the seats are independent: `town.unlocked_shops` and
+`market["inventory"]` are shared state, so the opponent genuinely perturbs the economy and
+must be held constant across any CVaR comparison.
+
+---
+
 ## What game theory actually says about this game
 
 Worth writing down, because the obvious textbook models give the right advice for
@@ -600,6 +734,19 @@ actionable has value zero, so the open-loop plan *is* the closed-loop equilibriu
 The useful part of that framing is that it makes a falsifiable prediction — that
 opponent-awareness can only pay on zero-lag decisions — and both zero-lag decisions
 in this game (sell timing, endgame posture) have now been tested and both failed.
+
+> **The same latency argument applies to market adaptation.** Live replays of `v0.2.4`
+> (the 719-step route-replay agent) across multiple losses (e.g. against `gisgisgis`,
+> `tyz123456`, `Raiden.B`) showed the route executing flawlessly every time—even correctly
+> triggering the WEED repair logic without desyncing—but still losing. The gap is
+> entirely due to the random shop draw: the route was recorded on a seed where it earned
+> $156k, but under adverse live shop spawns, those mathematically identical actions only
+> yielded ~$73k–$79k. Adapting to the market mid-game is practically unfeasible because
+> the 8–12 day production lag exceeds the 3-day shop spawn rate. Reverting to a dynamic
+> planner to chase shops would just resurrect the ~2.5x throughput gap the static route
+> closed. The optimal strategy remains an open-loop plan, but ideally one less sensitive
+> to shop draws (like selling fertilizer) or with even higher baseline throughput.
+
 
 **Where the textbook framing was actually load-bearing** is none of the above; it is
 the scoring rule. Pairwise ranking means the objective is P(win), not E[cash], and
