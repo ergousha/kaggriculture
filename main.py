@@ -396,7 +396,10 @@ def _trim_excess_seeds(obs, action, step):
         return action
 
     needed = {}
-    for slot in range(10):
+    # Use range(20) to cover the farmer (slot 0) and up to 19 hands.
+    # The route has a maximum of 14 hands, so range(10) was missing hands >= 9,
+    # causing their seeds to be aggressively trimmed.
+    for slot in range(20):
         for crop in _remaining_plants(slot, step, active):
             needed[crop] = needed.get(crop, 0) + 1
 
