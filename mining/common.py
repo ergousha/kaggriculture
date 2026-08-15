@@ -293,11 +293,15 @@ def describe(values: list[float]) -> dict:
 # disjoint from all of them so Phase 3's winner's-curse guard is honest.
 # ---------------------------------------------------------------------------
 
+# Seed counts are smaller than the single-opponent run because each stage now
+# multiplies seeds by the opponent panel: a candidate's sample size is
+# seeds x |panel|, not seeds. At the final stage 100 seeds x 6 opponents = 600
+# games per candidate, so the win-rate standard error is ~2%.
 SEED_BASE = 1_000_000
 N_SCREEN = 12
-N_MID = 50
-N_FINAL = 500
-N_HOLDOUT = 500
+N_MID = 30
+N_FINAL = 100
+N_HOLDOUT = 100
 
 
 def seed_set(n: int, base: int = SEED_BASE, mode: str = "sequential") -> list[int]:
@@ -325,6 +329,76 @@ def seed_sets(mode: str = "sequential", n_holdout: int = N_HOLDOUT) -> dict[str,
         "final": evaluation,
         "holdout": holdout,
     }
+
+
+# ---------------------------------------------------------------------------
+# Win-rate metrics
+#
+# The competition scores a skill rating driven by wins, not by cash, and cash is
+# overwhelmingly common-mode: measured live, corr(our cash, opponent cash) = +0.86,
+# because both seats draw from one shared market. Own-cash CVaR therefore mostly
+# measures "was this a good seed", which affects both players and cancels in the
+# head-to-head that actually sets the rating. These operate on the margin instead.
+# ---------------------------------------------------------------------------
+
+
+def win_rate(pairs: list[tuple[float, float]]) -> float:
+    """Fraction of (me, opp) pairs we win outright. Ties count as losses, matching
+    the arena's `win` field and the conservative reading of a tied rating update."""
+    if not pairs:
+        return float("nan")
+    return sum(1 for me, opp in pairs if me > opp) / len(pairs)
+
+
+def margins(pairs: list[tuple[float, float]]) -> list[float]:
+    return [me - opp for me, opp in pairs]
+
+
+def effective_labels(candidate_hash: str, labels: list[str]) -> list[str]:
+    """Panel labels excluding the candidate itself.
+
+    A panel member played against itself is a mirror it can at best draw, which
+    would dock every panel member ~1/N relative to non-members and bias selection
+    against exactly the strong routes the panel is built from. Self-matches are
+    dropped from a candidate's own aggregate; the per-opponent breakdown makes the
+    resulting difference in opponent count visible.
+    """
+    return [lab for lab in labels if not candidate_hash.startswith(lab)]
+
+
+def panel_scores(per_opponent: dict[str, list[tuple[float, float]]]) -> dict:
+    """Aggregate a candidate's results across the opponent panel.
+
+    `mean_win` is the primary ranking metric; `worst_win` is the robustness
+    tiebreak — the win rate against whichever panel member counters it best. A
+    route that beats five opponents and is crushed by the sixth is exactly the
+    single-opponent overfit this panel exists to catch.
+    """
+    per = {k: v for k, v in per_opponent.items() if v}
+    if not per:
+        return {"n": 0}
+    rates = {k: win_rate(v) for k, v in per.items()}
+    allpairs = [p for v in per.values() for p in v]
+    allmargins = margins(allpairs)
+    worst_label = min(rates, key=lambda k: rates[k])
+    return {
+        "n": len(allpairs),
+        "opponents": len(per),
+        "mean_win": statistics.fmean(rates.values()),
+        "worst_win": rates[worst_label],
+        "worst_opponent": worst_label,
+        "per_opponent": {k: round(v, 4) for k, v in sorted(rates.items())},
+        "pooled_win": win_rate(allpairs),
+        "mean_margin": statistics.fmean(allmargins),
+        "margin_cvar5": cvar(allmargins, 0.05),
+        "cash_cvar5": cvar([me for me, _ in allpairs], 0.05),
+        "cash_mean": statistics.fmean([me for me, _ in allpairs]),
+    }
+
+
+def panel_sort_key(s: dict) -> tuple:
+    """Primary mean win rate, worst-case win rate as the robustness tiebreak."""
+    return (s.get("mean_win", 0.0), s.get("worst_win", 0.0))
 
 
 # ---------------------------------------------------------------------------
