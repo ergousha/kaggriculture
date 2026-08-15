@@ -635,6 +635,59 @@ Without the held-out re-run this section would be claiming a ~$5k gain that does
 exist. Any future route selection must re-validate on fresh seeds; the ranking table is
 not the result.
 
+### Live outcome: the metric did not transfer, and why
+
+v0.2.5 ran 177 live episodes between 2026-08-13 and 2026-08-15. The caveat above —
+"the gain is modest and may not transfer" — is now measured rather than hypothetical.
+
+| | v0.2.5 (CVaR-selected) | v0.2.4 | |
+| --- | --- | --- | --- |
+| Mean cash | $93,257 | $89,157 | +4.6% |
+| **Live CVaR₅** | **$46,755** | **$48,208** | **−$1,453** |
+| Win rate, overall | 67.2% | 42.5% | |
+| Win rate, last 25% of games | **46.7%** | **16.0%** | |
+| Crashes / errors | 0 | 0 | |
+
+**The route is better; the metric we selected it on is not.** Offline we predicted
++$1,610 CVaR₅ and delivered **−$1,453**. The improvement showed up entirely in win
+rate — which the pipeline never optimised. Note also that raw leaderboard score is a
+trap here: both submissions climb then settle as matchmaking finds their level, and
+v0.2.4's headline 2220 is a *falling* number attached to an agent losing 84% of its
+recent games. Judge a submission on its converged win rate, not its score at an
+arbitrary age.
+
+Two measured causes:
+
+**Cash is 86% common-mode.** On live episodes `corr(our cash, opponent cash) = +0.86`,
+because both seats draw from one shared market. Own-cash CVaR therefore mostly measures
+*was this a good seed* — a factor that moves both players together and cancels in the
+head-to-head that sets the rating. Our own cash barely predicts winning: correlation
+with margin is only +0.31, and having above-median cash raises the win rate from 61.4%
+to just 73.0%. The competition scores P(win); we optimised E-tail[cash].
+
+**Single-opponent overfitting.** The shipped route beat its one evaluation opponent
+**97.0%** of the time offline and wins ~47% live. v0.2.4 was not a weak opponent — the
+*median* mined candidate beats it 0% of the time, and only 8.4% of the pool beats it
+≥90%. Selecting from that tail selects for routes that exploit one opponent's specific
+market timing on a shared order book. At 97% the metric is also saturated: it cannot
+rank the finalists at all, so among the leaders the pick was effectively arbitrary.
+
+Corpus staleness was *not* a factor — median replay cash drifted only +4.6% across the
+five days mined.
+
+**What changed as a result.** Phase 2 now scores every candidate against a diverse
+opponent **panel** (`mining/panel.py`) instead of one route, and Phase 3 selects on
+**mean win rate across the panel** with the worst-opponent win rate as the robustness
+tiebreak. Cash CVaR₅ and margin CVaR₅ are still reported, as diagnostics. Both phases
+print a saturation warning if the leaders exceed 95%, because that is the condition that
+produced this result. Self-matches are excluded from a candidate's own aggregate, and
+the held-out winner-vs-incumbent comparison is run on the panel members common to both.
+
+The panel's effect is immediate and visible: against one opponent the leaders sat at
+100.0% (unrankable); against a 4-opponent panel the leader fell to 80.8% with a
+worst-case of 23.3%, and one candidate averaging 75.8% turned out to win just **3.3%**
+against a single member — an exploit the old metric would have shipped.
+
 ### Caveats
 
 - **The gain is modest and may not transfer.** +3.7% CVaR₅ is statistically significant

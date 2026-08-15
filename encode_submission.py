@@ -85,7 +85,7 @@ def main(argv=None):
     ap.add_argument("--reference", default="main.py", help="agent to check scheme parity against")
     ap.add_argument("--out", default="logs/route_b85_parts.txt", help="where to write the snippet")
     ap.add_argument("--write-agent", metavar="PATH", help="also emit a complete agent file")
-    ap.add_argument("--version", default="0.2.5")
+    ap.add_argument("--version", default="0.2.6")
     ap.add_argument(
         "--allow-unvalidated",
         action="store_true",
@@ -114,9 +114,9 @@ def main(argv=None):
         target = holdout["winner_hash"]
         if not holdout.get("winner_beats_baseline") and not args.allow_unvalidated:
             raise SystemExit(
-                f"Phase 3 says the winner does NOT beat v0.2.4 on held-out CVaR_5 "
-                f"(delta {holdout['cvar5_delta']:+,.0f}). Refusing to encode; "
-                f"pass --allow-unvalidated to override."
+                f"Phase 3 says the winner does NOT beat the incumbent on held-out "
+                f"win rate (delta {holdout.get('win_delta', 0):+.1%}). Refusing to "
+                f"encode; pass --allow-unvalidated to override."
             )
 
     # A hash prefix is enough, since these are printed truncated everywhere else.
@@ -135,9 +135,10 @@ def main(argv=None):
         f"recorded ${cand['recorded_cash']:,.0f}"
     )
     if holdout:
+        w, b = holdout["winner"], holdout["baseline"]
         print(
-            f"  held-out CVaR_5 ${holdout['winner']['cvar5']:,.0f} vs v0.2.4 "
-            f"${holdout['baseline']['cvar5']:,.0f}  (delta {holdout['cvar5_delta']:+,.0f})"
+            f"  held-out win rate {w['mean_win']:.1%} vs incumbent {b['mean_win']:.1%} "
+            f"(delta {holdout.get('win_delta', 0):+.1%}), worst-opponent {w['worst_win']:.1%}"
         )
     print(f"  steps: {len(route)}")
     if len(route) != ROUTE_STEPS:
@@ -193,7 +194,7 @@ def main(argv=None):
                 "recorded_cash": cand.get("recorded_cash"),
                 "steps": len(route),
                 "hash": target,
-                "selected_by": "CVaR_5, held-out validated (see logs/cvar_report.json)",
+                "selected_by": "panel win rate, held-out validated (logs/cvar_report.json)",
             },
             version=args.version,
         )
