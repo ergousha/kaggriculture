@@ -542,40 +542,51 @@ of them is fixed yet.
 
 ---
 
-## Robust route mining (v0.2.5)
+## Robust route mining (v0.2.6)
 
-The route-replay agent scores well and varies wildly. v0.2.4 replays one fixed 719-step
-route; on a favourable seed it banks $156k, on an unfavourable one it collapses, because
-shops respawn every 3 days and production decisions pay off 8–12 days later. By the time
-the market tells you which route was right, it is far too late to change it. Reacting
-mid-game would cost the throughput that makes the route-replay approach work at all.
+The route-replay agent scores well and varies wildly. A fixed 719-step route banks $156k
+on a favourable seed and collapses on an unfavourable one, because shops respawn every 3
+days and production decisions pay off 8–12 days later. By the time the market tells you
+which route was right, it is far too late to change it. Reacting mid-game would cost the
+throughput that makes the route-replay approach work at all.
 
 So the stochasticity is handled offline instead of at runtime: mine every route the
-leaderboard has already played, stress-test each one against thousands of simulated
-markets, and ship the route with the best **worst case** rather than the best average.
+leaderboard has already played, stress-test each one against a panel of strong opponents
+across thousands of simulated markets, and ship the route that wins most reliably.
 
-Four scripts, run in order:
+Four scripts, run in order. **The full runbook, including the daily replay download, is
+under "Re-running the pipeline" below.**
 
 ```bash
 uv run python mine_replays.py --workers 12          # -> candidates.jsonl
 uv run python simulate_candidates.py --workers 12   # -> logs/simulation_results.jsonl
 uv run python rank_cvar.py --workers 12             # -> logs/cvar_report.json
-uv run python encode_submission.py --write-agent main.py
+uv run python encode_submission.py --write-agent main.py --version 0.2.6
 ```
 
-`encode_submission.py` refuses to emit unless Phase 3 recorded that the winner beat
-v0.2.4 on held-out CVaR₅ (override with `--allow-unvalidated`). The winning route is
-live in `main.py` as of v0.2.5; `opponents/v0_2_5.py` is its frozen snapshot.
+`encode_submission.py` refuses to emit unless Phase 3 recorded that the winner beat the
+incumbent held out (override with `--allow-unvalidated`). `simulate_candidates.py`
+supports `--resume`, keyed per `(candidate, opponent, seed)`.
 
-`simulate_candidates.py` supports `--resume`; the full sieve is ~4.5 h on 12 workers.
+> **Selection metric changed in v0.2.6.** v0.2.5 was selected on own-cash CVaR₅ against a
+> single opponent, and that choice did not survive contact with the ladder — see
+> "Live outcome" below. Selection is now **mean win rate across an opponent panel**, with
+> the worst-opponent win rate as the robustness tiebreak. Cash CVaR₅ and margin CVaR₅ are
+> still computed and reported, as diagnostics.
 
-### The metric is CVaR₅, not the 5th percentile
+### The metric: panel win rate, with CVaR₅ as a diagnostic
 
-**CVaR₅ = the mean of the worst 5% of outcomes** (25 of 500), not the score *at* the 5th
-percentile. The percentile tells you where the boundary is; CVaR tells you how bad things
-are past it. That difference is the whole point — it separates "bad seeds earn $80k" from
-"bad seeds earn $20k", which a percentile cannot. Selection is on CVaR₅ alone; mean,
-median, p5, min and max are reported for context only.
+Selection is **mean win rate across the opponent panel**, tie-broken by the win rate
+against the single panel member that counters the candidate best. The competition scores a
+skill rating driven by wins, and cash turns out to be a poor proxy for them — see "Live
+outcome".
+
+Where CVaR₅ still appears, it means **the mean of the worst 5% of outcomes**, not the score
+*at* the 5th percentile. The percentile tells you where the boundary is; CVaR tells you how
+bad things are past it — it separates "bad seeds earn $80k" from "bad seeds earn $20k".
+Two are reported: `cash CVaR₅` (own cash, the v0.2.5 selection metric) and `margin CVaR₅`
+(the head-to-head margin, which removes the common-mode market component). Margin CVaR₅ is
+typically slightly negative even for a strong route: on the worst 5% of seeds it loses.
 
 ### Method
 
@@ -591,25 +602,62 @@ median, p5, min and max are reported for context only.
   of their seed luck. The sets are nested — screen (12) ⊂ mid (50) ⊂ final (500) — so each
   stage reuses the episodes its predecessor paid for; the holdout (500) is disjoint.
 - **Three-stage sieve.** Deduplication recovers only ~1.4% of this corpus, so the pool
-  stays near 3,100 routes and a flat 50-seed screen would cost ~13 h. Screening all
-  candidates on 12 seeds, then the top 400 on 50, then the top 20 on 500 costs ~4.5 h for
-  the same final resolution.
+  stays near its full size and a flat screen at final resolution would cost days. All
+  candidates are screened on 12 seeds against the anchor, then the top 150 on 30 seeds
+  against the panel, then the top 12 on 100 seeds. Sample size is seeds x panel, so the
+  final stage is 600 games per candidate (win-rate standard error ~2%).
+- **Opponent panel, not one opponent.** Mid and final stages score against 6 structurally
+  different strong routes chosen by greedy max-min action distance and biased toward
+  distinct teams (`mining/panel.py`), anchored on the incumbent. Self-matches are excluded
+  from a candidate's own aggregate, since a panel member can only draw itself.
 - **What is scored is what ships:** the route baked into the real agent template, so the
   three runtime layers (WEED repair, SELL-slot ordering, hands alignment) are in play.
 
-### Results
+### Results — v0.2.6 (panel run, 7-day corpus)
 
-3,413 replays (100 GB) → 1,805 files with a qualifying seat → **3,089 unique candidates,
-all 3,089 passing the fidelity gate exactly, zero exclusions**. Then 61,268 paired-seed
-episodes with zero crashes, timeouts, invalid statuses or harness errors.
+4,791 replays (140 GB, 2026-08-08 → 08-14) → 2,541 files with a qualifying seat →
+**4,315 unique candidates, all passing the fidelity gate exactly, zero exclusions, zero
+rejects**. Then 82,020 sieve episodes plus 800 held-out, with zero crashes, timeouts,
+invalid statuses or harness errors.
+
+Winner: **`18057e3167`, team "somewhere after", episode 93034871 seat 0**, recorded
+$154,009.
+
+| | mean win | worst opp | margin CVaR₅ | cash CVaR₅ | cash mean |
+| --- | --- | --- | --- | --- | --- |
+| **Winner, vs 6-opponent panel** | **92.6%** | **84.0%** | −$1,328 | $51,376 | $92,766 |
+| Winner, held out vs 4 common opponents | 93.0% | 83.0% | −$1,094 | — | $94,204 |
+| **Winner, head-to-head vs v0.2.5, held out** | **96.0%** | — | −$923 | $46,776 | $94,105 |
+| v0.2.5 incumbent, same head-to-head | 4.0% | — | — | $40,887 | $84,805 |
+
+Winner's-curse shrinkage was negligible this time: selection 92.6% → held-out 93.0%.
+
+**Read the panel comparison with care.** Phase 3 reports the incumbent at 0.2% against the
+panel, which is an artifact, not a measurement: the panel is drawn from the top screen
+performers, and the screen ranks by win rate against the incumbent — so every panel member
+beats it ~100% by construction. The honest number is the direct head-to-head, **96/100 on
+held-out seeds with a +$9,300 mean margin**. Always run that separately; the runbook
+includes it as a step.
+
+The worst-opponent column earns its place. Finalist #4 averages 85.7% but wins only
+**50.0%** against one panel member, and #8 averages 78.5% with a **10.0%** worst case —
+both single-opponent exploits that a mean-only ranking would have promoted.
+
+<details>
+<summary>Previous run — v0.2.5, cash-CVaR₅ selection (superseded)</summary>
+
+3,413 replays (100 GB) → 3,089 candidates, all passing the fidelity gate. 61,268
+paired-seed episodes.
 
 | | CVaR₅ | mean | median | p5 | min | max |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Winner** (Hamed Seyed-allaei, ep 92449798 seat 0) | **$44,655** | $87,997 | $85,209 | $50,881 | $34,522 | $154,606 |
+| Winner (Hamed Seyed-allaei, ep 92449798 seat 0) | $44,655 | $87,997 | $85,209 | $50,881 | $34,522 | $154,606 |
 | v0.2.4 baseline | $43,045 | $84,914 | $81,406 | $48,563 | $31,938 | $148,251 |
 
-Held-out, 500 fresh seeds disjoint from every seed used in selection. Delta **+$1,610**
-CVaR₅; the winner is ahead on 275/500 paired seeds, p≈0.014.
+Held out on 500 fresh seeds; delta +$1,610 CVaR₅, ahead on 275/500 paired seeds, p≈0.014.
+This is the run whose metric failed to transfer — see "Live outcome" below.
+
+</details>
 
 ### Finding: recorded cash does not predict robustness
 
@@ -658,6 +706,10 @@ arbitrary age.
 
 Two measured causes:
 
+This repo already knew. "[The objective is P(win), not E[cash]](#the-objective-is-pwin-not-ecash)"
+has been in this README since before the pipeline was written, and the pipeline optimised
+E-tail[cash] anyway. The measurement below is what that cost.
+
 **Cash is 86% common-mode.** On live episodes `corr(our cash, opponent cash) = +0.86`,
 because both seats draw from one shared market. Own-cash CVaR therefore mostly measures
 *was this a good seed* — a factor that moves both players together and cancels in the
@@ -690,30 +742,34 @@ against a single member — an exploit the old metric would have shipped.
 
 ### Caveats
 
-- **The gain is modest and may not transfer.** +3.7% CVaR₅ is statistically significant
-  and practically small. Four consecutive versions have won their local paired-seed gates
-  and moved the live Kaggle score by nothing (see "Results" and
-  [docs/experiments.md](docs/experiments.md)). This is well inside that range.
-- **It does not fix the tail.** The winner's minimum is still $34,522 and its p5 $50,881.
-  Mining found a more robust route, not a robust one. For scale, local self-play over the
-  500 held-out seeds puts v0.2.4 at mean $84,914 with a worst case of **$31,938** — a
-  deeper tail than the ~$73k–$79k the live replays show under adverse shop draws, but
-  measured against a mirror rather than the real field, so the two are not directly
-  comparable. Either way, mining did not close it.
-- **The baseline is self-play.** The opponent is held constant at v0.2.4 for every run,
-  which is what CRN requires, but that makes the baseline row the only *mirror* match:
-  two identical routes bid for the same shared market inventory at the same instants.
-  On the ladder we never face ourselves. Treat it as a self-play reference, not a field
-  estimate — the same caveat that applies to every mirror A/B in this repo.
+- **Offline win rates are still optimistic.** The v0.2.5 run read 97% offline and delivered
+  ~47% live. This run reads 92.6% mean / 84.0% worst-case against a 6-opponent panel, which
+  is a far better-conditioned measurement, but it is still a panel of six against a live
+  field of hundreds. Expect the live figure to land below the offline one; the open
+  question is by how much.
+- **The panel is selected against the incumbent.** Members are drawn from the top screen
+  performers, and the screen ranks by win rate against the incumbent anchor — so all six
+  beat it ~100% by construction. This inflates Phase 3's headline delta and makes the
+  incumbent's panel score meaningless. Always read the direct head-to-head instead; the
+  runbook has it as an explicit step. Widening `--panel-from-top` dilutes but does not
+  remove the bias.
+- **It does not fix the tail.** Margin CVaR₅ is **−$923** even head-to-head against the
+  incumbent: on the worst 5% of seeds the winner still loses. Cash CVaR₅ improved to
+  $46,776 from v0.2.5's $40,887 on the same seeds, so the floor rose — but a floor of
+  ~$47k against a mean of ~$94k is still a wide distribution. Mining finds more robust
+  routes, not robust ones.
 - **Seed distribution is an assumption.** Local seeds are sequential integers; Kaggle
   assigns each episode a seed we cannot observe or reproduce. All market randomness comes
   from `random.Random((seed * 1_000_003) ^ day)`, so these seeds do span the shop-draw
   space, but nothing here can verify the distributions match. `--seed-mode random31`
   samples the same 31-bit range the engine's own fallback uses, as a second read.
-- **Finalist concentration.** 18 of the 20 finalists came from one team. They are
-  genuinely distinct routes (24–72% of steps differ, no identical pairs) and the winner
-  is from a separate lineage, but a shared strategy class could still share a failure mode
-  the held-out set would not detect.
+- **Finalist concentration is better but not gone.** The 12 finalists span 5 teams
+  (Ueddy 5, "somewhere after" 3, Arda Ceylan 2, one each from Utkarsh #2 and Shadow),
+  against 18-of-20 from a single team in the v0.2.5 run. A shared strategy class can still
+  share a failure mode the panel does not contain.
+- **Local results have not historically predicted the ladder.** Four consecutive versions
+  won their local paired-seed gates and moved the live score by nothing. Treat every number
+  above as a veto, not a forecast.
 
 ### Seat symmetry
 
@@ -726,6 +782,104 @@ and both scored exactly $155,241. So mining need not preserve seat assignment �
 This does **not** mean the seats are independent: `town.unlocked_shops` and
 `market["inventory"]` are shared state, so the opponent genuinely perturbs the economy and
 must be held constant across any CVaR comparison.
+
+### Re-running the pipeline
+
+Full cycle: pull the new daily replay dumps, re-mine, re-sieve, re-validate, ship. Budget
+**~8 h wall on 12 workers**, almost all of it Phase 2. Every step is resumable and every
+gate is a hard stop — if one fails, do not proceed to the next.
+
+**0. Pull the new days.** Each daily dump is a ~450 MB zip that unpacks to ~20 GB of JSON
+(~690 episodes). Datasets are named `kaggle/kaggriculture-episodes-YYYY-MM-DD` and appear
+a day in arrears. Unpack each into its own `replays/<date>/` directory — `mine_replays.py`
+searches recursively and does not care how the days are split.
+
+```bash
+# one day; repeat per date, or loop. Skips itself if the directory already looks full.
+uv run python - <<'PY'
+import os
+from submit import load_credentials; load_credentials()
+from kaggle.api.kaggle_api_extended import KaggleApi
+api = KaggleApi(); api.authenticate()
+for day in ("2026-08-15", "2026-08-16"):          # <- edit
+    dest = f"replays/{day}"; os.makedirs(dest, exist_ok=True)
+    if len([f for f in os.listdir(dest) if f.endswith(".json")]) > 500:
+        print(f"{day}: already present, skipping"); continue
+    api.dataset_download_files(f"kaggle/kaggriculture-episodes-{day}", path=dest, unzip=True)
+PY
+du -sh replays/*        # sanity: ~20 GB and ~690 files per day
+```
+
+Watch disk: seven days is ~140 GB. Old days can be deleted once mined — `candidates.jsonl`
+carries the compressed traces, so the pool survives without the raw replays.
+
+**1. Mine** (~12 min for 7 days / 4,800 replays):
+
+```bash
+uv run python mine_replays.py --workers 12 2>&1 | tee logs/phase1.log
+```
+
+*Gate:* the fidelity line must read `N admitted, 0 excluded`, and `logs/mine_rejects.jsonl`
+must be empty. Anything else means extraction broke on the new days — stop and inspect.
+
+**2. Sieve** (~7 h; screen is ~85% of it):
+
+```bash
+nohup uv run python simulate_candidates.py --workers 12 > logs/phase2.log 2>&1 &
+tail -f logs/phase2.log
+```
+
+*Watch two things.* The panel printout after the screen stage — members should span
+distinct teams with `min-dist-to-earlier` ≳ 0.3; if they cluster, the panel is too narrow.
+And `!! SATURATED` on the **mid or final** stage, meaning the leaders all exceed 95% and
+the metric cannot rank them. (Saturation on the *screen* stage is expected and harmless —
+it runs against the single anchor by design.) If it fires later, widen and resume:
+
+```bash
+uv run python simulate_candidates.py --workers 12 --resume --panel-size 10 --panel-from-top 400
+```
+
+**3. Rank and validate** (~5 min):
+
+```bash
+uv run python rank_cvar.py --workers 12 2>&1 | tee logs/phase3.log
+```
+
+*Gate:* `VERDICT: PASS`, exit code 0. Read the **per-opponent** breakdown, not the mean —
+a winner strong against most of the panel and weak against one member is an exploit, and
+the live field contains that member.
+
+*Also run the direct head-to-head against the incumbent.* The panel is built from routes
+that beat the anchor, so the incumbent's panel score is rigged against it and its headline
+delta is inflated. The honest number is one-on-one on held-out seeds:
+
+```bash
+uv run python local_arena.py --agent logs/_mined_agents/<winner-hash>.py \
+    --opponent opponents/<incumbent>.py --episodes 100 --seed 1000500 --workers 12
+```
+
+**4. Encode and ship:**
+
+```bash
+uv run python encode_submission.py --write-agent main.py --version 0.2.7
+uv run python -m ruff format main.py && uv run python -m ruff check main.py
+uv run python scripts/rank_ladder.py --episodes 1 --require-perfect    # gate: 10/10
+uv run python scripts/sync_opponent.py                                 # freeze opponents/v0_2_7.py
+uv run python submit.py --dry-run                                      # then without --dry-run
+```
+
+**5. Judge the result honestly, two days later.** Do *not* read the raw leaderboard score:
+a submission climbs and then settles as matchmaking finds its level, so a fresh score is
+meaningless and a stale one can be a falling number attached to a collapsing agent. Compare
+converged win rates instead — the last quartile of each submission's episodes:
+
+```bash
+uv run python scripts/examine_agent.py "Automated release v0.2.7" --limit 10
+```
+
+`.gitignore` already excludes `replays/`, `logs/` and `candidates.jsonl`; nothing from a
+run needs committing except `main.py`, the new `opponents/vX_Y_Z.py`, and whatever you
+learn.
 
 ---
 
