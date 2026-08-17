@@ -11,6 +11,27 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from kaggle.api.kaggle_api_extended import KaggleApi
 
+# Anchor every read and write to the repo, not the caller's CWD: `sys.path` is
+# already __file__-relative, so CWD-relative paths meant running from scripts/
+# re-downloaded the leaderboard and scattered outputs into the wrong tree.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRATCH_DIR = os.path.join(REPO_ROOT, "scratch")
+LOGS_DIR = os.path.join(REPO_ROOT, "logs")
+
+
+def agent_team_id(a):
+    """Read an agent's team id, or None if unset (kagglesdk defaults it to 0)."""
+    value = a.get("teamId") if isinstance(a, dict) else getattr(a, "team_id", None)
+    return value if value else None
+
+
+def episode_id(ep):
+    """Stable identity for an episode, or None if the API omitted it."""
+    value = ep.get("id") if isinstance(ep, dict) else getattr(ep, "id", None)
+    if not value and hasattr(ep, "_id"):
+        value = ep._id
+    return value or None
+
 
 def with_retry(fn, *args, what: str, attempts: int = 5, base_delay: float = 2.0):
     """Call a Kaggle API method, backing off on failure.
@@ -40,19 +61,36 @@ def main():
     api = KaggleApi()
     api.authenticate()
 
-    # 1. Load leaderboard
-    lb_files = glob.glob("scratch/kaggriculture-publicleaderboard*.csv")
-    if not lb_files:
-        print("Leaderboard CSV not found in scratch/. Downloading...")
-        os.makedirs("scratch", exist_ok=True)
-        api.competition_leaderboard_download("kaggriculture", "scratch/")
+    # 1. Load leaderboard. `--refresh` forces a new snapshot: otherwise the first
+    # run's CSV makes this branch dead forever, and every later run silently pairs
+    # a stale leaderboard with live episode data.
+    refresh = "--refresh" in sys.argv
+    pattern = os.path.join(SCRATCH_DIR, "kaggriculture-publicleaderboard*.csv")
+    lb_files = sorted(glob.glob(pattern))
+
+    if refresh or not lb_files:
+        print("Downloading leaderboard snapshot...")
+        os.makedirs(SCRATCH_DIR, exist_ok=True)
+        api.competition_leaderboard_download("kaggriculture", SCRATCH_DIR)
         import zipfile
 
-        with zipfile.ZipFile("scratch/kaggriculture.zip", "r") as zip_ref:
-            zip_ref.extractall("scratch/")
-        lb_files = glob.glob("scratch/kaggriculture-publicleaderboard*.csv")
+        zip_path = os.path.join(SCRATCH_DIR, "kaggriculture.zip")
+        if os.path.exists(zip_path):
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(SCRATCH_DIR)
+        lb_files = sorted(glob.glob(pattern))
 
-    df = pd.read_csv(lb_files[0])
+    if not lb_files:
+        print(f"No leaderboard CSV in {SCRATCH_DIR}; cannot continue.")
+        sys.exit(1)
+
+    # Snapshots are timestamp-named, so the last sorted entry is the newest.
+    lb_path = lb_files[-1]
+    print(f"Using leaderboard snapshot {os.path.basename(lb_path)}")
+    if len(lb_files) > 1 and not refresh:
+        print(f"  ({len(lb_files) - 1} older snapshots present; pass --refresh to re-download)")
+
+    df = pd.read_csv(lb_path)
 
     top_teams = df.head(30)
 
@@ -69,6 +107,7 @@ def main():
     top_5_matchmaking = []
     failed_teams = []
     teams_without_submissions = []
+    unidentified_episodes = 0
 
     print(f"Fetching active submissions and episodes for {len(top_teams)} teams...")
     for _idx, row in top_teams.iterrows():
@@ -97,11 +136,12 @@ def main():
                     what=f"{team_name} episodes (submission {sub_id})",
                 )
                 for ep in eps or []:
-                    ep_id = getattr(ep, "id", None) or (
-                        ep.get("id") if isinstance(ep, dict) else None
-                    )
-                    if not ep_id and hasattr(ep, "_id"):
-                        ep_id = ep._id
+                    ep_id = episode_id(ep)
+                    if ep_id is None:
+                        # No identity to dedup on; keying them all under None would
+                        # collapse the set to one and report EpisodeCount == 1.
+                        unidentified_episodes += 1
+                        continue
                     all_episodes[ep_id] = ep
 
             unique_eps = list(all_episodes.values())
@@ -120,9 +160,7 @@ def main():
 
             if row["Rank"] <= 5:
                 # Sort unique episodes by ID descending to get the most recent ones
-                unique_eps.sort(
-                    key=lambda x: getattr(x, "id", 0) or getattr(x, "_id", 0), reverse=True
-                )
+                unique_eps.sort(key=lambda x: episode_id(x) or 0, reverse=True)
 
                 opponents = []
                 for ep in unique_eps[:20]:
@@ -133,15 +171,15 @@ def main():
                         agents = ep._agents
 
                     for a in agents:
-                        a_team_id = getattr(a, "team_id", None) or (
-                            a.get("teamId") if isinstance(a, dict) else None
+                        a_team_id = agent_team_id(a)
+                        if a_team_id is None or str(a_team_id) == str(team_id):
+                            # Unset id: cannot tell self from opponent, so skip rather
+                            # than pollute the histogram the conclusion rests on.
+                            continue
+                        a_team_name = getattr(a, "team_name", None) or (
+                            a.get("teamName") if isinstance(a, dict) else None
                         )
-                        if str(a_team_id) != str(team_id):
-                            # We get the opponent's name if available, otherwise just use their ID
-                            a_team_name = getattr(a, "team_name", None) or (
-                                a.get("teamName") if isinstance(a, dict) else str(a_team_id)
-                            )
-                            opponents.append(a_team_name)
+                        opponents.append(a_team_name or str(a_team_id))
 
                 top_5_matchmaking.append(
                     {
@@ -155,10 +193,12 @@ def main():
             failed_teams.append({"Rank": int(row["Rank"]), "TeamName": team_name, "Error": str(e)})
 
     coverage = {
+        "LeaderboardSnapshot": os.path.basename(lb_path),
         "TeamsRequested": int(len(top_teams)),
         "TeamsCollected": len(results),
         "TeamsFailed": failed_teams,
         "TeamsWithoutSubmissions": teams_without_submissions,
+        "UnidentifiedEpisodes": unidentified_episodes,
         "Complete": len(results) == len(top_teams),
     }
 
@@ -188,9 +228,10 @@ def main():
     )
     plt.grid(True)
 
-    os.makedirs("logs", exist_ok=True)
-    plt.savefig("logs/score_vs_episodes.png")
-    print("\nSaved plot to logs/score_vs_episodes.png")
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    plot_path = os.path.join(LOGS_DIR, "score_vs_episodes.png")
+    plt.savefig(plot_path)
+    print(f"\nSaved plot to {plot_path}")
 
     # 3. Output matchmaking analysis
     print("\n--- Matchmaking for Top 5 Teams (last 20 episodes) ---")
@@ -202,7 +243,7 @@ def main():
 
     # Save results. `coverage` goes in the artifact so a truncated run is
     # self-identifying rather than reading as a complete sweep.
-    with open("logs/leaderboard_research.json", "w") as f:
+    with open(os.path.join(LOGS_DIR, "leaderboard_research.json"), "w") as f:
         json.dump(
             {
                 "coverage": coverage,
