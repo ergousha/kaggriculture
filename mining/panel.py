@@ -13,8 +13,17 @@ strong routes, so a route that only counters one opponent's timing cannot win, a
 the win-rate spread reopens.
 
 Panel selection is greedy max-min diversity over per-step action distance, seeded
-with the strongest screen performer, and biased toward distinct teams. The v0.2.4
-anchor is always included so results stay comparable with the previous run.
+with the strongest entry, and biased toward distinct teams. The incumbent anchor is
+always included so results stay comparable with the previous run.
+
+WHAT "STRONGEST" MEANS is the caller's choice, and v0.2.7 changed it. Under
+`--panel-source screen-top` (the v0.2.6 behaviour) entries arrive ordered by win
+rate against the incumbent anchor, so every member beats the incumbent ~100% by
+construction and the panel measures "routes that counter us" rather than "routes
+the ladder rewards". Under `--panel-source leaderboard-top` entries arrive ordered
+by their team's ladder rank, so the panel is a sample of the band above us. The
+selection algorithm below is identical either way; only the ordering and the
+eligible pool differ.
 """
 
 from __future__ import annotations
@@ -71,16 +80,29 @@ def select_panel(entries: list[dict], k: int, min_distance: float = 0.15) -> lis
     return chosen
 
 
+def min_distances(panel: list[dict]) -> list[float]:
+    """Each member's distance to the nearest earlier member; the seed gets 1.0.
+
+    This is the number the runbook gates on (>= 0.3): below it the panel is six
+    variations on one route and the worst-opponent tiebreak stops meaning anything.
+    """
+    return [
+        1.0 if i == 0 else min(route_distance(p["route"], q["route"]) for q in panel[:i])
+        for i, p in enumerate(panel)
+    ]
+
+
 def describe_panel(panel: list[dict], start: int = 1) -> str:
     lines = []
-    for i, p in enumerate(panel):
-        if i == 0:
-            spread = "-"
-        else:
-            spread = f"{min(route_distance(p['route'], q['route']) for q in panel[:i]):.2f}"
+    for i, (p, d) in enumerate(zip(panel, min_distances(panel), strict=True)):
+        spread = "-" if i == 0 else f"{d:.2f}"
+        rank = p.get("rank")
+        rank_s = f"rank {rank:>4}" if rank is not None else "rank    ?"
+        win = p.get("win")
+        win_s = f"{win:>6.1%}" if isinstance(win, float) else "     ?"
         lines.append(
             f"    {i + start}. {p['hash'][:10]}  {str(p.get('team', '?'))[:18]:<18} "
-            f"min-dist-to-earlier {spread}"
+            f"{rank_s}  screen-win-vs-anchor {win_s}  min-dist-to-earlier {spread}"
         )
     return "\n".join(lines)
 

@@ -66,6 +66,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests", "."]
 python_files = ["test_*.py", "*_test.py"]
+# Flat layout, nothing installed: without this a test under tests/ cannot import
+# the pipeline modules that sit at the repo root.
+pythonpath = ["."]
 
 [tool.pyrefly]
 python-version = "3.12.0"

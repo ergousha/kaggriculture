@@ -36,6 +36,33 @@ deploy: the route baked into build_route_agent's template, so main.py's three
 runtime layers (WEED repair, SELL-slot ordering, hands alignment) are in play.
 Scoring the bare trace would measure something we do not ship.
 
+WHERE THE PANEL COMES FROM (`--panel-source`, changed in v0.2.7). The v0.2.6 run
+drew panel members from the top `--panel-from-top` *screen* performers, and the
+screen ranks by win rate against the incumbent anchor -- so every member beat the
+incumbent ~100% by construction, and the panel was really "the routes that counter
+us". Worse, the pool it drew from is whoever happened to appear in the daily replay
+dumps: a sample of the whole field weighted by episode volume, not by strength. We
+are matched by rating, so that optimised win rate against the *median* of the field
+while the ladder pays for beating the band above us.
+
+`--panel-source leaderboard-top` instead draws members from candidates whose team
+sits in the rank window `--panel-rank-min .. --panel-team-top`, ordered by that
+rank. Selection within the eligible set is unchanged -- the same greedy max-min
+action-distance diversity and distinct-team bias from `mining/panel.py` -- and the
+incumbent is still the anchor, so results stay comparable. `screen-top` reproduces
+v0.2.6.
+
+It is a WINDOW, not a top-N, and that is a measured choice. Issue #22 scored the
+opponents the top 5 teams actually played and found rank-5 `peikopon` (2987) never
+matches anyone above 3000: isolation into the >3000 pool is a consequence of
+crossing 3000, not the way up. Selecting against the leaders would optimise for
+games we are not matched into. `--panel-rank-min` excludes them, so the panel is
+the band around and modestly above our own rating, and it advances as we climb.
+
+Requires `team_rank` on every candidate, which Phase 1 stamps from
+`scripts/fetch_team_ranks.py`. A pool mined before that existed will be rejected
+rather than silently falling back.
+
 SEAT AND OPPONENT. The candidate plays seat 0 against a fixed opponent in seat 1.
 The market's inventory is shared state between seats, so the opponent genuinely
 perturbs the economy and must be held constant across candidates -- it is. Traces
@@ -56,8 +83,9 @@ from mining.common import PROJECT_ROOT, decode_route_b85
 
 AGENT_CACHE = os.path.join(PROJECT_ROOT, "logs", "_mined_agents")
 # The incumbent is what we must beat, and it is what is live on the ladder.
-DEFAULT_OPPONENT = os.path.join("opponents", "v0_2_5.py")
+DEFAULT_OPPONENT = os.path.join("opponents", "v0_2_6.py")
 STAGES = ("screen", "mid", "final")
+PANEL_SOURCES = ("screen-top", "leaderboard-top")
 
 
 def run_job(job: dict) -> dict:
@@ -257,6 +285,138 @@ def complete(per_opp: dict, seeds: list[int], labels: list[str]) -> bool:
     return all(len(per_opp.get(label, [])) == len(seeds) for label in labels)
 
 
+def in_band(candidate: dict, rank_min: int, rank_max: int) -> bool:
+    """Is this candidate's team inside the panel's rating window?
+
+    An unranked team (left the board, or renamed since the snapshot) is *unknown*,
+    not top-ranked -- `None` must never sort to the front of the ladder, so it is
+    mapped past every real rank rather than to zero.
+    """
+    rank = candidate.get("team_rank")
+    return rank is not None and rank_min <= rank <= rank_max
+
+
+def describe_band(rank_min: int, rank_max: int) -> str:
+    """`ranks 185..469 (2300.4..2600.1)`, when the rank map is available.
+
+    Ranks are what `candidates.jsonl` carries, but every argument about *which*
+    band to aim at is made in rating points (see issue #22), so print both.
+    """
+    window = f"ranks {rank_min}..{rank_max}"
+    ranks, _ = common.load_team_ranks()
+    if not ranks:
+        return window
+    scores: dict[int, float] = {}
+    import json as _json
+
+    with open(common.TEAM_RANKS_PATH, encoding="utf-8") as f:
+        for meta in (_json.load(f).get("teams") or {}).values():
+            scores[int(meta["rank"])] = float(meta["score"])
+    inside = [s for r, s in scores.items() if rank_min <= r <= rank_max]
+    if not inside:
+        return window
+    return f"{window} ({min(inside):.1f}..{max(inside):.1f} rating)"
+
+
+def check_panel_source(
+    candidates: list[dict], source: str, rank_min: int, rank_max: int, panel_size: int
+) -> None:
+    """Fail before the screen, not after it.
+
+    The screen is ~85% of a seven-hour run, and every reason a leaderboard panel
+    cannot be built is knowable from `candidates.jsonl` alone. Discovering a pool
+    with no `team_rank` after the screen finishes wastes six hours.
+    """
+    if source != "leaderboard-top":
+        return
+    if not any("team_rank" in c for c in candidates):
+        raise SystemExit(
+            "--panel-source leaderboard-top needs `team_rank` on the candidates, and this "
+            "pool has none.\nRun scripts/fetch_team_ranks.py --refresh, then re-run "
+            "mine_replays.py (Phase 1) to stamp it in."
+        )
+    if rank_min > rank_max:
+        raise SystemExit(f"--panel-rank-min {rank_min} is worse than --panel-team-top {rank_max}")
+    band = [c for c in candidates if in_band(c, rank_min, rank_max)]
+    teams = {c["team"] for c in band}
+    if len(teams) < panel_size - 1:
+        raise SystemExit(
+            f"only {len(teams)} distinct teams in the corpus sit in {describe_band(rank_min, rank_max)}, "
+            f"but the panel needs {panel_size - 1} mined members.\nWiden the band "
+            "(--panel-rank-min / --panel-team-top) or lower --panel-size."
+        )
+    print(
+        f"  panel source: leaderboard-top, {describe_band(rank_min, rank_max)} "
+        f"-> {len(band):,} eligible candidates from {len(teams)} teams"
+    )
+
+
+def build_panel_entries(ranked: list[tuple[dict, dict]], args) -> list[dict]:
+    """Ordered pool that `select_panel` seeds and greedily extends.
+
+    `ranked` is every screened candidate, strongest-first by win rate against the
+    anchor. The two sources differ only in which entries are eligible and in what
+    "strongest" means for the seed pick:
+
+      screen-top       top N screen performers, ordered by win rate vs the anchor.
+      leaderboard-top  candidates from teams ranked <= N, ordered by that rank;
+                       ties broken by screen win rate, which only chooses *which*
+                       of one team's routes to use and so cannot re-introduce the
+                       anti-incumbent bias across the panel.
+    """
+    if args.panel_source == "screen-top":
+        pool = list(ranked[: args.panel_from_top])
+    else:
+        pool = [
+            (sc, cand)
+            for sc, cand in ranked
+            if in_band(cand, args.panel_rank_min, args.panel_team_top)
+        ]
+        pool.sort(key=lambda r: (r[1]["team_rank"], -r[0]["mean_win"]))
+    return [
+        {
+            "hash": cand["hash"],
+            "team": cand.get("team"),
+            "rank": cand.get("team_rank"),
+            "route": common.decode_route_b85(cand["route_b85"]),
+            "win": sc["mean_win"],
+        }
+        for sc, cand in pool
+    ]
+
+
+PANEL_MIN_SPREAD = 0.30
+
+
+def _warn_on_panel_quality(panelmod, picked: list[dict], panel_size: int) -> None:
+    """Print the two ways a panel silently stops being a panel.
+
+    The runbook gates on both by eye; printing them means a `grep '!!'` over the
+    log finds them, and a resumed run that quietly picked fewer members than asked
+    is not mistaken for a full one.
+    """
+    if len(picked) < panel_size - 1:
+        print(
+            f"        !! panel is short: asked for {panel_size - 1} mined members, "
+            f"got {len(picked)}. The eligible pool ran out of routes far enough apart."
+        )
+    tight = [
+        (p["hash"][:10], d)
+        for p, d in zip(picked, panelmod.min_distances(picked), strict=True)
+        if d < PANEL_MIN_SPREAD
+    ]
+    if tight:
+        print(
+            f"        !! {len(tight)} panel member(s) sit closer than "
+            f"{PANEL_MIN_SPREAD:.2f} to an earlier member "
+            f"({', '.join(f'{h} {d:.2f}' for h, d in tight)}); the panel is narrower "
+            "than it looks."
+        )
+    teams = {p.get("team") for p in picked}
+    if len(teams) < len(picked):
+        print(f"        !! {len(picked)} mined members span only {len(teams)} distinct teams")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Phase 2: simulate candidate routes")
     ap.add_argument("--candidates", default="candidates.jsonl")
@@ -270,10 +430,31 @@ def main(argv=None):
         "--panel-size", type=int, default=6, help="opponents in the panel (incl. anchor)"
     )
     ap.add_argument(
+        "--panel-source",
+        choices=PANEL_SOURCES,
+        default="leaderboard-top",
+        help="where panel members are drawn from (screen-top reproduces v0.2.6)",
+    )
+    ap.add_argument(
         "--panel-from-top",
         type=int,
         default=120,
-        help="draw panel members from the top N screen performers",
+        help="screen-top only: draw panel members from the top N screen performers",
+    )
+    ap.add_argument(
+        "--panel-team-top",
+        type=int,
+        default=30,
+        help="leaderboard-top only: draw panel members from teams ranked <= N",
+    )
+    ap.add_argument(
+        "--panel-rank-min",
+        type=int,
+        default=1,
+        help=(
+            "leaderboard-top only: exclude teams ranked better than N, making the panel a "
+            "rating BAND rather than the top of the ladder (see issue #22)"
+        ),
     )
     ap.add_argument(
         "--panel-min-distance",
@@ -314,6 +495,14 @@ def main(argv=None):
     anchor = abspath(args.opponent)
     if not os.path.exists(anchor):
         raise SystemExit(f"opponent not found: {anchor}")
+
+    check_panel_source(
+        candidates,
+        args.panel_source,
+        args.panel_rank_min,
+        args.panel_team_top,
+        args.panel_size,
+    )
 
     results_path = abspath(args.results)
     os.makedirs(os.path.dirname(results_path), exist_ok=True)
@@ -405,21 +594,13 @@ def main(argv=None):
 
         if stage == "screen":
             pool = [c for _, c in ranked[: args.k_mid]]
-            # Build the panel from the strongest, most structurally distinct routes
-            # the screen surfaced -- not from recorded cash, which is uncorrelated
-            # with strength.
+            # Build the panel from structurally distinct routes -- never from
+            # recorded cash, which is uncorrelated with strength. `--panel-source`
+            # decides whether "distinct and strong" is read off the screen (v0.2.6)
+            # or off the ladder (v0.2.7); see the module docstring.
             from mining import panel as panelmod
 
-            entries = []
-            for sc, cand in ranked[: args.panel_from_top]:
-                entries.append(
-                    {
-                        "hash": cand["hash"],
-                        "team": cand.get("team"),
-                        "route": common.decode_route_b85(cand["route_b85"]),
-                        "win": sc["mean_win"],
-                    }
-                )
+            entries = build_panel_entries(ranked, args)
             picked = panelmod.select_panel(
                 entries, max(1, args.panel_size - 1), args.panel_min_distance
             )
@@ -428,19 +609,34 @@ def main(argv=None):
             ]
             panel_meta = {
                 "anchor": anchor_label,
+                "source": args.panel_source,
+                "team_top": args.panel_team_top if args.panel_source == "leaderboard-top" else None,
+                "rank_min": args.panel_rank_min if args.panel_source == "leaderboard-top" else None,
+                "band": (
+                    describe_band(args.panel_rank_min, args.panel_team_top)
+                    if args.panel_source == "leaderboard-top"
+                    else None
+                ),
+                "from_top": args.panel_from_top if args.panel_source == "screen-top" else None,
+                "eligible": len(entries),
                 "members": [
                     {
                         "label": p["hash"][:10],
                         "hash": p["hash"],
                         "team": p.get("team"),
+                        "team_rank": p.get("rank"),
                         "screen_win": round(p["win"], 4),
                     }
                     for p in picked
                 ],
             }
-            print(f"\n  opponent panel ({len(panel)} members, anchor + {len(picked)} mined):")
+            print(
+                f"\n  opponent panel ({len(panel)} members, anchor + {len(picked)} mined, "
+                f"source {args.panel_source}, {len(entries):,} eligible):"
+            )
             print(f"    1. {anchor_label:<10}  {'(anchor, incumbent)':<18}")
             print(panelmod.describe_panel(picked, start=2))
+            _warn_on_panel_quality(panelmod, picked, args.panel_size)
         elif stage == "mid":
             pool = [c for _, c in ranked[: args.k_final]]
 
@@ -452,6 +648,7 @@ def main(argv=None):
             {
                 "anchor": os.path.relpath(anchor, PROJECT_ROOT),
                 "panel": panel_meta,
+                "panel_source": args.panel_source,
                 "panel_labels": [lab for lab, _ in panel],
                 "seed_mode": args.seed_mode,
                 "seed_sets": {k: [v[0], v[-1], len(v)] for k, v in seeds.items()},
