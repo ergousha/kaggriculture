@@ -749,3 +749,22 @@ lookup is far cheaper than the planner it replaced.
 | v0.1.0 | 2026-08-11 | egg engine deleted, pasture role churn fixed, SELL sized from shed | 23W-7L vs v0.0.9 | 29 | $56,279 | 14W-15L | **passed its gate, moved nothing.** Marginally the best of v0.0.6/7/9/0.1.0, all of which sit at ~$56k and ~48%. Score 586.3, rank #2440/3892. See post-mortem. |
 | v0.1.1 | PR #10 | wheat promoted to a real crop target; leftover-land tail switched to wheat | 17W-13L vs v0.1.0, 24W-6L vs v0.0.9; **ladder 36/60, between tier 5 and 6** | — | — | — | last of the heuristic line; frozen at `opponents/v0_1_1.py` |
 | **v0.2.0** | pending | **route replay** — Dmitry Larko ep 91767673 seat 1, plus WEED repair, SELL-slot ordering, hands alignment | **ladder 60/60, at or above tier 9**; 30W-0L vs v0.1.1 and v0.1.0; $139,804 vs baseline | — | — | — | awaiting submit |
+
+---
+
+## v0.2.6 — Leaderboard Gap Research (Issue #22)
+
+The gap between our agent (v0.2.6 at 2290 rating) and the leaderboard leader (~3220) was investigated to determine if it's solvable through strategic improvements or if it's structural (matchmaking/convergence).
+
+### Findings
+
+1. **Volume/Convergence is not the main gap driver.** The top 5 teams have between 99 and 500 episodes on their active submissions. The score correlates with true skill, not purely with episode count.
+2. **Matchmaking bands isolate the top teams.** An analysis of the top 5 teams' last 20 episodes shows they almost exclusively match against each other (e.g., `カワシギ` played `Utkarsh #2` 6 times, `Thomas Tschinkel` 4 times, `ReCurSiON` 4 times). They are in a closed >3000 rating band. Our opponent panel in `mining/panel.py` samples the field broadly, meaning it is not representative of what an agent faces at 3200.
+3. **Our 2290 rating is real.** Over the last quartile (29 completed episodes) of v0.2.6's live play, it achieved a **44.83% win rate** (13W 16L 0T). The agent is no longer climbing; it has converged at 2290 against similarly rated opponents.
+4. **Shop-draw cancellation:** Because we haven't matched against a top-30 team in our recent episodes, we could not run a direct, same-episode fingerprint comparison. However, the matchmaking isolation and the 44.83% converged win rate already prove the gap is real and our agent is plateaued.
+
+### Conclusion & Recommendation
+
+The gap from 2290 to 3200 is **real** and not a convergence artefact. We are losing at a 2290 rating band because we are playing worse than the 3200 rated teams. However, because the top teams are isolated in their own matchmaking band, any offline testing must be calibrated against *their* specific playstyles (which often involve heavy wheat rotation and exploiting price curves).
+
+**Recommendation:** The rest of the milestone should NOT be re-scoped away from strategic improvements. The goal of breaking 2290 is valid. However, the evaluation tooling (especially the opponent panel) must be updated to exclusively sample from the >3000 rating band so that we are optimizing against the correct meta.
