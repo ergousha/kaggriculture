@@ -759,12 +759,31 @@ The gap between our agent (v0.2.6 at 2290 rating) and the leaderboard leader (~3
 ### Findings
 
 1. **Volume/Convergence is not the main gap driver.** The top 5 teams have between 99 and 500 episodes on their active submissions. The score correlates with true skill, not purely with episode count.
-2. **Matchmaking bands isolate the top teams.** An analysis of the top 5 teams' last 20 episodes shows they almost exclusively match against each other (e.g., `カワシギ` played `Utkarsh #2` 6 times, `Thomas Tschinkel` 4 times, `ReCurSiON` 4 times). They are in a closed >3000 rating band. Our opponent panel in `mining/panel.py` samples the field broadly, meaning it is not representative of what an agent faces at 3200.
+2. **Matchmaking isolation is a gradient, not a closed band.** Scoring every opponent recorded across the top 5 teams' last 20 episodes against the leaderboard shows isolation tracks rating and decays sharply on approach to 3000:
+
+   | Team | Score | opponents >3000 | opponents in top 30 |
+   | --- | --- | --- | --- |
+   | `カワシギ` | 3208.0 | 14/20 | 20/20 |
+   | `Thomas Tschinkel` | 3131.6 | 12/20 | 19/20 |
+   | `Utkarsh #2` | 3020.7 | 11/20 | 14/20 |
+   | `ReCurSiON` | 3000.1 | 6/20 | 14/20 |
+   | `peikopon` | 2987.5 | 0/19 | 1/19 |
+
+   The top two are effectively sealed into a >3000 pool (`カワシギ` played `Utkarsh #2` 6 times, `Thomas Tschinkel` 4, `ReCurSiON` 4). But rank-5 `peikopon`, at 2987.5, matches *nobody* above 3000 and draws from the broad field. Isolation is therefore a **consequence** of crossing 3000, not a precondition for getting there — no team in this sample climbed by playing only >3000 opponents.
 3. **Our 2290 rating is real.** Over the last quartile (29 completed episodes) of v0.2.6's live play, it achieved a **44.83% win rate** (13W 16L 0T). The agent is no longer climbing; it has converged at 2290 against similarly rated opponents.
-4. **Shop-draw cancellation:** Because we haven't matched against a top-30 team in our recent episodes, we could not run a direct, same-episode fingerprint comparison. However, the matchmaking isolation and the 44.83% converged win rate already prove the gap is real and our agent is plateaued.
+4. **Shop-draw cancellation:** Because we haven't matched against a top-30 team in our recent episodes, we could not run a direct, same-episode fingerprint comparison. The matchmaking gradient and the converged win rate are consistent with a real, non-artefactual gap, though at n=29 the win rate alone is weak evidence (13W-16L has a wide confidence interval and does not by itself separate "plateaued" from "still noisy").
+
+**Data provenance.** The numbers above come from `logs/leaderboard_research.json`, produced by `scripts/research_leaderboard.py`. The committed run covers **20 of the 31 teams requested** (top 30 plus us): ranks 21-30 and our own rank-498 row were lost to API errors partway through the run, which the script previously swallowed silently. Findings 1 and 2 rest only on the top 5 and are unaffected; any statement about the shape of the top 30 as a whole is not supported by this run. The script now reports coverage and exits non-zero on an incomplete sweep, so a re-run is needed before the top-30 view can be quoted.
 
 ### Conclusion & Recommendation
 
-The gap from 2290 to 3200 is **real** and not a convergence artefact. We are losing at a 2290 rating band because we are playing worse than the 3200 rated teams. However, because the top teams are isolated in their own matchmaking band, any offline testing must be calibrated against *their* specific playstyles (which often involve heavy wheat rotation and exploiting price curves).
+The gap from 2290 to 3200 is **real** and not a convergence artefact. We are losing at a 2290 rating band because we are playing worse than the teams above us.
 
-**Recommendation:** The rest of the milestone should NOT be re-scoped away from strategic improvements. The goal of breaking 2290 is valid. However, the evaluation tooling (especially the opponent panel) must be updated to exclusively sample from the >3000 rating band so that we are optimizing against the correct meta.
+**Recommendation:** The rest of the milestone should NOT be re-scoped away from strategic improvements — the goal of breaking 2290 is valid.
+
+The evaluation tooling should become *rating-aware*, sampling a band around and modestly above our own rating (roughly 2300–2600 today) and advancing that band as we climb. Calibrating against the >3000 meta is **not** supported by the data above: `peikopon` sits at rank 5 having never played a >3000 opponent, so that meta is not the ladder we are on. Sampling exclusively from it would optimize against games we are not currently matched into while discarding the opponents that actually set our score.
+
+Two caveats on implementing this, both of which make it larger than a config change:
+
+- The panel does not "sample the field broadly" as originally written here. `simulate_candidates.py:414` draws panel members from the top `--panel-from-top` screen performers, and `mining/panel.py:41` then runs greedy max-min diversity over per-step action distance. It is already a strongest-first selection; the axis it lacks is rating, not strength.
+- There is no rating signal to filter on. Panel entries carry `hash`, `route`, and `team` only, and mined replays never record an opponent rating (no `rating` field exists anywhere under `mining/`). Making the panel rating-aware requires capturing opponent rating at mine time first.
