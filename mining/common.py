@@ -402,6 +402,37 @@ def panel_sort_key(s: dict) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# Ladder ranks
+#
+# `scripts/fetch_team_ranks.py` writes the map; Phase 1 stamps it onto every
+# candidate and Phase 2 draws its opponent panel from it. Kept here so the two
+# phases cannot disagree about the file's shape.
+# ---------------------------------------------------------------------------
+
+TEAM_RANKS_PATH = os.path.join(PROJECT_ROOT, "logs", "team_ranks.json")
+
+
+def load_team_ranks(path: str | None = None) -> tuple[dict[str, int], str]:
+    """`{team name: rank}` plus the snapshot it came from.
+
+    Returns an empty map when the file is absent rather than raising: Phase 1 must
+    still run on a machine that has never talked to the Kaggle API, and it records
+    `team_rank: null` for every candidate in that case. Phase 2 is the phase that
+    refuses to proceed without ranks, and only when asked for a leaderboard panel.
+    """
+    path = path or TEAM_RANKS_PATH
+    if not os.path.exists(path):
+        return {}, ""
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    teams = payload.get("teams") or {}
+    return (
+        {name: int(meta["rank"]) for name, meta in teams.items()},
+        payload.get("snapshot") or "",
+    )
+
+
+# ---------------------------------------------------------------------------
 # JSONL io
 # ---------------------------------------------------------------------------
 

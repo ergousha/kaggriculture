@@ -621,6 +621,8 @@ typically slightly negative even for a strong route: on the worst 5% of seeds it
   different strong routes chosen by greedy max-min action distance and biased toward
   distinct teams (`mining/panel.py`), anchored on the incumbent. Self-matches are excluded
   from a candidate's own aggregate, since a panel member can only draw itself.
+- **Panel drawn from a rating band, not from the whole field** (`--panel-source`, new in
+  v0.2.7). See "Aiming the panel at the ladder" below; `screen-top` reproduces v0.2.6.
 - **What is scored is what ships:** the route baked into the real agent template, so the
   three runtime layers (WEED repair, SELL-slot ordering, hands alignment) are in play.
 
@@ -669,6 +671,64 @@ Held out on 500 fresh seeds; delta +$1,610 CVaR₅, ahead on 275/500 paired seed
 This is the run whose metric failed to transfer — see "Live outcome" below.
 
 </details>
+
+### Aiming the panel at the ladder (v0.2.7)
+
+The v0.2.6 panel had two selection biases stacked on top of each other, and the second was
+the larger.
+
+**One:** members were drawn from the top `--panel-from-top` *screen* performers, and the
+screen ranks by win rate against the incumbent anchor. So every member beat the incumbent
+~100% by construction, and the panel measured "routes that counter *us*".
+
+**Two, and worse:** the pool those members came from is whoever happened to appear in the
+daily replay dumps — a sample of the whole field weighted by episode volume, not by
+strength. We are matched by rating (~2290 at the time), so the pipeline was optimising win
+rate against the *median of the field* while the ladder pays for beating the band above
+us. The transfer gap had been measured twice by then and both times pointed the same way:
+
+| run | offline | live |
+| --- | --- | --- |
+| v0.2.5, single opponent | 97.0% | ~47% |
+| v0.2.6, 6-opponent panel | 92.6% mean / 84.0% worst | plateau at ~2290 |
+
+Widening the panel narrowed the gap; aiming it should narrow it further.
+
+**The join.** `scripts/fetch_team_ranks.py` writes `logs/team_ranks.json` from the public
+leaderboard CSV, Phase 1 stamps `team_rank` onto every candidate, and Phase 2's new
+`--panel-source leaderboard-top` draws members only from candidates whose team sits inside
+`--panel-rank-min .. --panel-team-top`. Selection *within* that window is unchanged: the
+same greedy max-min action-distance diversity and distinct-team bias, still anchored on the
+incumbent so results stay comparable. Team names are unique on the leaderboard and the
+replay's `info.TeamNames` carries the same string, so name is a sound key — Kaggle does not
+put team ids in a replay.
+
+Nothing new had to be mined. The existing corpus already spans 255 teams, and every band
+worth aiming at is deep enough to build a panel from:
+
+| band | ranks | candidates | teams |
+| --- | --- | --- | --- |
+| ≥2846 | 1–30 | 479 | 12 |
+| 2600–2900 | 20–184 | ~1,000 | ~50 |
+| **2300–2600** | **185–469** | **635** | **42** |
+
+**Why a band and not the top.** The obvious reading — aim at the leaders — is the one the
+data rejects. [#22](https://github.com/ergousha/kaggriculture/issues/22) scored every
+opponent the top 5 teams played and found rank-5 `peikopon`, at 2987, matches *nobody*
+above 3000: isolation into the >3000 pool is a **consequence** of crossing 3000, not the
+route to it. Selecting against that meta would optimise for games we are not matched into
+while discarding the opponents that actually set our score. So the panel is drawn from
+**2300–2600** — ranks 185–469, i.e. from our own rating (2294, rank 476) up to ~300 points
+above it. The window is meant to advance as we climb; `--panel-rank-min` is the knob.
+
+**Two limits, both real.** The rank is a snapshot of *today*, while a mined replay was
+played days earlier by whatever agent that team was running then — a team that has climbed
+since gets credit its mined route did not earn. The snapshot filename is recorded in
+`logs/team_ranks.json` and echoed by Phase 1 so any claim can be dated. And the mid-stage
+*pool* (top `--k-mid` by screen) is still cut by win rate against the incumbent, so a route
+that beats the band but loses to the incumbent never reaches the panel at all. That cut is
+what makes a 4,315-route pool affordable; fixing it means screening against the panel,
+which costs six times the compute.
 
 ### Finding: recorded cash does not predict robustness
 
@@ -758,11 +818,12 @@ against a single member — an exploit the old metric would have shipped.
   is a far better-conditioned measurement, but it is still a panel of six against a live
   field of hundreds. Expect the live figure to land below the offline one; the open
   question is by how much.
-- **The panel is selected against the incumbent.** Members are drawn from the top screen
-  performers, and the screen ranks by win rate against the incumbent anchor — so all six
-  beat it ~100% by construction. This inflates Phase 3's headline delta and makes the
-  incumbent's panel score meaningless. Always read the direct head-to-head instead; the
-  runbook has it as an explicit step. Widening `--panel-from-top` dilutes but does not
+- **The panel was selected against the incumbent** (fixed in v0.2.7 — see "Aiming the
+  panel at the ladder"). Under `--panel-source screen-top` members are drawn from the top
+  screen performers, and the screen ranks by win rate against the incumbent anchor — so
+  all six beat it ~100% by construction. This inflates Phase 3's headline delta and makes
+  the incumbent's panel score meaningless. Always read the direct head-to-head instead;
+  the runbook has it as an explicit step. Widening `--panel-from-top` dilutes but does not
   remove the bias.
 - **It does not fix the tail.** Margin CVaR₅ is **−$923** even head-to-head against the
   incumbent: on the worst 5% of seeds the winner still loses. Cash CVaR₅ improved to
@@ -824,6 +885,14 @@ du -sh replays/*        # sanity: ~20 GB and ~690 files per day
 Watch disk: seven days is ~140 GB. Old days can be deleted once mined — `candidates.jsonl`
 carries the compressed traces, so the pool survives without the raw replays.
 
+**0b. Refresh the ladder ranks** (~10 s). Phase 1 stamps each candidate with its team's
+rank, and Phase 2 builds the opponent panel from it, so a stale snapshot aims the panel at
+last week's field:
+
+```bash
+uv run python scripts/fetch_team_ranks.py --refresh     # -> logs/team_ranks.json
+```
+
 **1. Mine** (~12 min for 7 days / 4,800 replays):
 
 ```bash
@@ -832,6 +901,8 @@ uv run python mine_replays.py --workers 12 2>&1 | tee logs/phase1.log
 
 *Gate:* the fidelity line must read `N admitted, 0 excluded`, and `logs/mine_rejects.jsonl`
 must be empty. Anything else means extraction broke on the new days — stop and inspect.
+Also read the `ladder join` block: it prints how many candidates the top-10/30/100 bands
+contain, and the panel can only be as good as that.
 
 **2. Sieve** (~7 h; screen is ~85% of it):
 
@@ -840,14 +911,28 @@ nohup uv run python simulate_candidates.py --workers 12 > logs/phase2.log 2>&1 &
 tail -f logs/phase2.log
 ```
 
-*Watch two things.* The panel printout after the screen stage — members should span
-distinct teams with `min-dist-to-earlier` ≳ 0.3; if they cluster, the panel is too narrow.
-And `!! SATURATED` on the **mid or final** stage, meaning the leaders all exceed 95% and
-the metric cannot rank them. (Saturation on the *screen* stage is expected and harmless —
-it runs against the single anchor by design.) If it fires later, widen and resume:
+The v0.2.7 run aimed the panel at the 2300–2600 band, which on that day's snapshot was
+ranks 185–469 — re-derive the bounds from the current leaderboard rather than reusing
+these, and advance the window as we climb:
 
 ```bash
-uv run python simulate_candidates.py --workers 12 --resume --panel-size 10 --panel-from-top 400
+nohup uv run python simulate_candidates.py --workers 12 \
+    --panel-rank-min 185 --panel-team-top 469 > logs/phase2.log 2>&1 &
+```
+
+Pass `--panel-source screen-top` to reproduce the v0.2.6 selection instead. Everything
+that cannot build a panel is checked *before* the six-hour screen, not after it, and the
+screen is panel-independent — so changing the band mid-run costs nothing if you `--resume`.
+
+*Watch two things.* The panel printout after the screen stage — members should span
+distinct teams with `min-dist-to-earlier` ≳ 0.3, which the run now warns about itself
+(`grep '!!' logs/phase2.log`). And `!! SATURATED` on the **mid or final** stage, meaning
+the leaders all exceed 95% and the metric cannot rank them. (Saturation on the *screen*
+stage is expected and harmless — it runs against the single anchor by design.) If it fires
+later, widen and resume:
+
+```bash
+uv run python simulate_candidates.py --workers 12 --resume --panel-size 10 --panel-team-top 100
 ```
 
 **3. Rank and validate** (~5 min):

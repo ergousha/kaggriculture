@@ -229,6 +229,11 @@ def main(argv=None):
         action="store_true",
         help="skip the fidelity gate (debugging only; pool is then unvalidated)",
     )
+    ap.add_argument(
+        "--team-ranks",
+        default=common.TEAM_RANKS_PATH,
+        help="team -> ladder rank map from scripts/fetch_team_ranks.py",
+    )
     args = ap.parse_args(argv)
 
     root = args.replays if os.path.isabs(args.replays) else os.path.join(PROJECT_ROOT, args.replays)
@@ -242,6 +247,18 @@ def main(argv=None):
     print(
         f"  threshold ${args.threshold:,.0f}   workers {args.workers}   json backend {common.JSON_BACKEND}"
     )
+
+    team_ranks, rank_snapshot = common.load_team_ranks(args.team_ranks)
+    if team_ranks:
+        print(f"  team ranks: {len(team_ranks):,} teams from {rank_snapshot}")
+    else:
+        # Not fatal here, but Phase 2's leaderboard panel needs these, so make the
+        # omission loud rather than letting it surface 7 hours later.
+        print(
+            f"  !! no team ranks at {args.team_ranks}; every candidate gets team_rank=null "
+            "and `--panel-source leaderboard-top` will refuse to run. "
+            "Run scripts/fetch_team_ranks.py --refresh first."
+        )
 
     t0 = time.time()
     survivors, stats = pass_head_scan(files, args.threshold, args.workers)
@@ -310,6 +327,7 @@ def main(argv=None):
             if h in by_hash:
                 by_hash[h]["duplicates"] += 1
                 continue
+            team = row["teams"][seat] if seat < len(row["teams"]) else "?"
             by_hash[h] = {
                 "hash": h,
                 "route_b85": row["traces"][key],
@@ -318,7 +336,11 @@ def main(argv=None):
                 "seed": row["seed"],
                 "seat": seat,
                 "episode": row.get("episode"),
-                "team": (row["teams"][seat] if seat < len(row["teams"]) else "?"),
+                "team": team,
+                # Ladder rank of the team that played this route, as of the snapshot
+                # named above. None for a team no longer on the board (or renamed);
+                # Phase 2 treats unknown as "not a top team" rather than guessing.
+                "team_rank": team_ranks.get(team),
                 "source_path": os.path.relpath(row["path"], PROJECT_ROOT),
                 "duplicates": 0,
             }
@@ -405,7 +427,29 @@ def main(argv=None):
             "  NOTE recorded cash is seed-luck contaminated and is metadata only; "
             "Phase 3 selects on CVaR."
         )
+        _report_rank_coverage(admitted, rank_snapshot)
     return 0
+
+
+def _report_rank_coverage(admitted: list[dict], snapshot: str) -> None:
+    """How much of the pool the ladder join actually reached.
+
+    Phase 2's leaderboard panel can only draw from the matched part, so a thin
+    match at the top of the ladder is the failure mode to catch here -- not the
+    overall match rate.
+    """
+    ranked = [r for r in admitted if r.get("team_rank") is not None]
+    print(
+        f"  ladder join ({snapshot or 'no snapshot'}): {len(ranked):,} of {len(admitted):,} "
+        f"candidates matched a team on the board, "
+        f"{len({r['team'] for r in ranked}):,} distinct teams"
+    )
+    for n in (10, 30, 100):
+        band = [r for r in ranked if r["team_rank"] <= n]
+        print(
+            f"    top {n:>3}: {len(band):>5,} candidates from "
+            f"{len({r['team'] for r in band}):>3} teams"
+        )
 
 
 if __name__ == "__main__":
