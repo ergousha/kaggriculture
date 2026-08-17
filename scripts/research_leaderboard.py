@@ -2,6 +2,7 @@ import glob
 import json
 import os
 import sys
+import time
 from collections import Counter
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,26 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from kaggle.api.kaggle_api_extended import KaggleApi
+
+
+def with_retry(fn, *args, what: str, attempts: int = 5, base_delay: float = 2.0):
+    """Call a Kaggle API method, backing off on failure.
+
+    This sweep issues one `competition_list_episodes` call per *submission* per team,
+    so request volume scales with the field's submission count and the API starts
+    refusing partway through. Without a backoff the caller's `except` turns that into
+    a silently truncated result set.
+    """
+    for attempt in range(attempts):
+        try:
+            return fn(*args)
+        except Exception as exc:  # noqa: BLE001 - retried, then re-raised below
+            if attempt == attempts - 1:
+                raise
+            delay = base_delay * (2**attempt)
+            print(f"  ! {what} failed ({exc}); retrying in {delay:.0f}s")
+            time.sleep(delay)
+    return None
 
 
 def main():
@@ -40,22 +61,28 @@ def main():
     if my_team.empty:
         raise ValueError("Could not find our team 'erginakin' in the leaderboard CSV.")
 
+    my_team_id = my_team.iloc[0]["TeamId"]
     if my_team.index[0] >= 30:
         top_teams = pd.concat([top_teams, my_team])
 
     results = []
     top_5_matchmaking = []
+    failed_teams = []
+    teams_without_submissions = []
 
-    print("Fetching active submissions and episodes for top teams...")
+    print(f"Fetching active submissions and episodes for {len(top_teams)} teams...")
     for _idx, row in top_teams.iterrows():
         team_id = row["TeamId"]
         team_name = row["TeamName"]
         score = row["Score"]
 
         try:
-            subs = api.competition_team_submissions(team_id)
+            subs = with_retry(
+                api.competition_team_submissions, team_id, what=f"{team_name} submissions"
+            )
             if not subs:
                 print(f"[{team_name}] No active submissions")
+                teams_without_submissions.append({"Rank": int(row["Rank"]), "TeamName": team_name})
                 continue
 
             all_episodes = {}
@@ -64,8 +91,12 @@ def main():
                 if sub_id is None:
                     sub_id = int(sub.ref)
 
-                eps = api.competition_list_episodes(sub_id)
-                for ep in eps:
+                eps = with_retry(
+                    api.competition_list_episodes,
+                    sub_id,
+                    what=f"{team_name} episodes (submission {sub_id})",
+                )
+                for ep in eps or []:
                     ep_id = getattr(ep, "id", None) or (
                         ep.get("id") if isinstance(ep, dict) else None
                     )
@@ -79,6 +110,7 @@ def main():
             results.append(
                 {
                     "Rank": row["Rank"],
+                    "TeamId": int(team_id),
                     "TeamName": team_name,
                     "Score": score,
                     "EpisodeCount": episode_count,
@@ -120,22 +152,27 @@ def main():
 
         except Exception as e:
             print(f"Error fetching data for {team_name}: {e}")
+            failed_teams.append({"Rank": int(row["Rank"]), "TeamName": team_name, "Error": str(e)})
+
+    coverage = {
+        "TeamsRequested": int(len(top_teams)),
+        "TeamsCollected": len(results),
+        "TeamsFailed": failed_teams,
+        "TeamsWithoutSubmissions": teams_without_submissions,
+        "Complete": len(results) == len(top_teams),
+    }
 
     # 2. Plot
     df_results = pd.DataFrame(results)
     if df_results.empty:
         print("No team data collected — see the errors above.")
-        return
+        sys.exit(1)
 
     plt.figure(figsize=(10, 6))
     plt.scatter(df_results["EpisodeCount"], df_results["Score"], alpha=0.7)
 
     for _i, row in df_results.iterrows():
-        if (
-            row["Rank"] <= 5
-            or "ergousha"
-            in str(row["TeamMemberUserNames"] if "TeamMemberUserNames" in row else "").lower()
-        ):
+        if row["Rank"] <= 5 or row["TeamId"] == my_team_id:
             plt.annotate(
                 row["TeamName"],
                 (row["EpisodeCount"], row["Score"]),
@@ -145,7 +182,10 @@ def main():
 
     plt.xlabel("Episode Count (Active Submissions)")
     plt.ylabel("Leaderboard Score")
-    plt.title("Score vs Episode Count (Top 30 + Us)")
+    plt.title(
+        f"Score vs Episode Count ({coverage['TeamsCollected']} of "
+        f"{coverage['TeamsRequested']} teams)"
+    )
     plt.grid(True)
 
     os.makedirs("logs", exist_ok=True)
@@ -160,9 +200,27 @@ def main():
         for opp, count in counts.most_common():
             print(f"  {opp}: {count}")
 
-    # Save results
+    # Save results. `coverage` goes in the artifact so a truncated run is
+    # self-identifying rather than reading as a complete sweep.
     with open("logs/leaderboard_research.json", "w") as f:
-        json.dump({"results": results, "top_5_matchmaking": top_5_matchmaking}, f, indent=2)
+        json.dump(
+            {
+                "coverage": coverage,
+                "results": results,
+                "top_5_matchmaking": top_5_matchmaking,
+            },
+            f,
+            indent=2,
+        )
+
+    if not coverage["Complete"]:
+        print(
+            f"\nINCOMPLETE: collected {coverage['TeamsCollected']} of "
+            f"{coverage['TeamsRequested']} teams "
+            f"({len(failed_teams)} errored, {len(teams_without_submissions)} without submissions)."
+        )
+        print("Do not quote whole-field conclusions from this run; re-run before use.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
