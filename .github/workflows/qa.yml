@@ -41,7 +41,12 @@ jobs:
       - name: Run Mypy Type Check
         run: |
           uv run mypy submit.py main.py local_arena.py \
-            mine_replays.py simulate_candidates.py rank_cvar.py encode_submission.py mining/
+            mine_replays.py simulate_candidates.py rank_cvar.py encode_submission.py \
+            mining/ tests/
+
+      - name: Run Test Suite
+        run: |
+          uv run pytest -q
 
       - name: Run Agent Pre-flight & Smoke Test
         run: |

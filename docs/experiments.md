@@ -787,3 +787,54 @@ Two caveats on implementing this, both of which make it larger than a config cha
 
 - The panel does not "sample the field broadly" as originally written here. `simulate_candidates.py:414` draws panel members from the top `--panel-from-top` screen performers, and `mining/panel.py:41` then runs greedy max-min diversity over per-step action distance. It is already a strongest-first selection; the axis it lacks is rating, not strength.
 - There is no rating signal to filter on. Panel entries carry `hash`, `route`, and `team` only, and mined replays never record an opponent rating (no `rating` field exists anywhere under `mining/`). Making the panel rating-aware requires capturing opponent rating at mine time first.
+
+---
+
+## Market layer: measured and exhausted (Issue #23)
+
+The shipped route uses **927 of 7,190 market order slots (12.9%)**. 339 of 719 steps emit
+no market order at all, and only **6 steps** hit the 10-order cap. Market orders cost no
+unit-turns — `_process_market` never touches units, and `_commit_unit` only checks cash
+and shed capacity. On paper this is a large free action channel.
+
+It is not usable. Three variants were built and measured against panel opponent
+`2f741e6bd5`. The variant code lived in the analysis session's scratchpad and is not
+committed; reproduce from the descriptions below.
+
+| variant | what it does | result |
+| --- | --- | --- |
+| **Defer** | hold sales below a price floor, drain the backlog later | **catastrophic** — $26k / $23k / $1k at floors 0.60 / 0.85 / 1.00, against a $104k baseline on seed 2000000 |
+| **Accelerate** | sell the turn the product lands, capped by the route's own remaining scheduled volume | +$61 mean cash, +$215 mean margin over 30 paired seeds; win rate unchanged at 90% (27W-0T-3L both) |
+| **Drip** | replace route SELLs with a per-turn quote sized to the market | broken by construction — it sells the 351 units of feed WHEAT the route buys, and the herd starves |
+
+**Why deferral fails is the interesting part.** The route is not a production plan with a
+market layer bolted on — it is a **cash schedule**. 277 HIRE orders and every BUY are
+timed against money the route expects to already have. Delay a sale and the next HIRE
+fails, the hands never materialise, and throughput collapses. Any future market work has
+to move the BUY schedule together with the sale schedule (that is #30).
+
+Acceleration is real but sits inside the noise band; it does halve shed overflow (25 → 15
+items lost). It is not worth a submission on its own — see #25.
+
+This is consistent with Kaito Fukami's published ablation, which puts +$819 to +$1,115 on
+his sell layer and attributes everything else to the route.
+
+### The trap that cost two measurement rounds: `obs.private.shed` predates the turn
+
+In `kaggle_environments/envs/kaggriculture/kaggriculture.py` (1.32.6) the interpreter runs
+`_apply_unit_action` for the farmer and every hand (L922-926), **then** `_process_market`
+(L928), then `_town_consume` (L929).
+
+So the shed an agent observes is the shed *before* this turn's `PLACE` / `DROP` /
+end-of-day deposits land in it. It is a **lower bound**, not the quantity available to
+sell. Any adaptive market layer that writes `qty = min(route_qty, observed_shed)` silently
+truncates every sale, every turn, for every product. All three variants above shipped with
+this bug, and the symptom — a total collapse to near-$0 — reads as an economic result and
+is not one.
+
+`main.py` is not affected today, because it replays recorded quantities verbatim. The
+moment anything sizes an order from the observation, it is.
+[`tests/test_observation_ordering.py`](../tests/test_observation_ordering.py) pins the
+ordering so this fails loudly instead of quietly: it drives a scripted episode in which a
+same-turn `PLACE` feeds a `SELL` the observation says is impossible, and a same-turn
+`PICKUP` starves a `SELL` the observation permitted.
