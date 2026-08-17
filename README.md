@@ -91,6 +91,17 @@ The following mechanics are useful to keep in mind when designing the agent:
   (`agent.py: get_last_callable` → `[v for v in env.values() if callable(v)][-1]`).
   A helper defined below `agent` silently becomes the agent and every turn errors.
   This cost the first working build 1,436 ERROR statuses. `submit.py` asserts against it.
+- **`obs.private.shed` predates the turn's unit actions.** The interpreter applies
+  `_apply_unit_action` for the farmer and every hand (`kaggriculture.py` L922-926,
+  kaggle-environments 1.32.6), **then** `_process_market` (L928), then `_town_consume`
+  (L929). The shed you observe is therefore the shed *before* this turn's `PLACE` /
+  `DROP` / end-of-day deposits land in it — a **lower bound**, not the sellable quantity.
+  Sizing an order with `qty = min(route_qty, observed_shed)` truncates every sale, every
+  turn, for every product, and the collapse to near-$0 that follows looks economic and is
+  not. `main.py` is safe only because it replays recorded quantities verbatim.
+  [tests/test_observation_ordering.py](tests/test_observation_ordering.py) pins the
+  ordering; the measurement rounds it cost are in
+  [docs/experiments.md](docs/experiments.md#market-layer-measured-and-exhausted-issue-23).
 
 ### The economics that decide the strategy
 
