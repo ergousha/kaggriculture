@@ -945,10 +945,14 @@ alternated), against the v0.2.7 incumbent:
 The ladder cannot see an 80-point win-rate collapse against a peer, because every rung it
 contains is $45k weaker than we are. It is a crash test, not a strength test.
 
-The fix generalises #25's rule instead of adding a second hardcoded item: precompute
+The fix generalised #25's rule instead of adding a second hardcoded item: precompute
 `_PICKUP_SUFFIX_SUMS`, the per-item suffix sum of what the route still lifts out of the
-shed, and reserve it before accelerating. That is derived from the route, so it survives
-the next route swap — a blanket `FERTILIZER` exclusion would not have.
+shed, and reserve it before accelerating. That is derived from the route, so it would have
+survived the next route swap — a blanket `FERTILIZER` exclusion would not have. It is not
+in the tree, because the layer it protects was reverted; recover it from PR #35 if #30
+revives the idea. What the tree keeps is
+[tests/test_sell_layer.py](../tests/test_sell_layer.py), which pins the rule and the
+`PICKUP` volumes it has to respect.
 
 ### Bug 2: the emitted template no longer matched the emitted agent
 
@@ -991,10 +995,16 @@ that could work.
 
 ### Verdict
 
-The layer is correct now and it fails #25's own gate — "not worse on win rate vs
-`opponents/v0_2_6.py`" — 0 seeds out of 30. It should not ship. `_accelerate_sells` with
-`budget` empty is bit-identical in behaviour to v0.2.7's `_rank_sells`, and reproduces its
-$86,513 / 96.7% exactly, so reverting the behaviour is a one-line change.
+Both bugs were fixed and the layer still failed #25's own gate — "not worse on win rate vs
+`opponents/v0_2_6.py`" — on 0 seeds out of 30, so **it was reverted**. `main.py` is back to
+v0.2.7's `_rank_sells` and `AGENT_VERSION` is back to `0.2.7`; `_accelerate_sells` with
+`budget` forced empty reproduced v0.2.7 at $86,513 / 96.7% exactly, which is how we know
+the slot-handling rewrite was never the problem and the acceleration always was.
+
+There is no v0.2.8. What survives the branch is this write-up, the argparse fix in
+`rank_ladder.py`, and two test files: `tests/test_sell_layer.py` for the three restraints
+that make the SELL layer safe, and `tests/test_agent_template.py`, which fails if
+`AGENT_TEMPLATE` stops regenerating `main.py` byte for byte.
 
 Count for the record: this is the tenth of twelve structural changes to `main.py` to lose
 paired seeds.
