@@ -838,3 +838,75 @@ moment anything sizes an order from the observation, it is.
 ordering so this fails loudly instead of quietly: it drives a scripted episode in which a
 same-turn `PLACE` feeds a `SELL` the observation says is impossible, and a same-turn
 `PICKUP` starves a `SELL` the observation permitted.
+
+---
+
+## v0.2.7 — aiming the opponent panel at a rating band (Issue #24)
+
+### What was wrong
+
+Two selection biases stacked. Panel members were drawn from the top `--panel-from-top`
+*screen* performers, and the screen ranks by win rate against the incumbent anchor — so
+every member beat the incumbent ~100% by construction. Underneath that, the pool they came
+from was whoever happened to appear in the daily replay dumps: a sample of the whole field
+weighted by episode volume, not by strength. We are matched by rating, so the pipeline was
+optimising win rate against the median of the field.
+
+### The band, and why not the top
+
+Issue #24 as written says "top N of the ladder". That was not run, because #22 had already
+measured the opposite: rank-5 `peikopon` at 2987 matches nobody above 3000, so isolation
+into the >3000 pool is a **consequence** of crossing 3000, not the way up. Selecting
+against the leaders would optimise for games we are not matched into.
+
+The panel was therefore drawn from **ranks 185–469 (2300.2–2599.1 rating)** — from our own
+rating (2294, rank 476) to ~300 points above. `--panel-team-top` still supports the literal
+top-N reading; `--panel-rank-min` is what makes it a window.
+
+### Result
+
+| | mean win | worst opp | margin CVaR₅ | cash mean |
+| --- | --- | --- | --- | --- |
+| Winner `044a7741e9` (Ueddy), panel | 93.8% | 77.0% | −$8,881 | $93,286 |
+| Winner, held out on 100 fresh seeds | 93.2% | 79.0% | −$9,533 | $90,702 |
+| v0.2.6 incumbent, same held-out grid | 83.6% | 51.0% | −$9,849 | $90,013 |
+| Winner vs v0.2.6 head-to-head, 100 disjoint seeds | 96.0% | — | — | $87,019 |
+
+79,980 sieve episodes + 1,000 held out, zero bad. Ladder 10/10. Shrinkage −0.6%.
+
+### What was actually learned, as distinct from what was shipped
+
+**1. The bias was real and is now measurable.** v0.2.6's Phase 3 scored the incumbent at
+**0.2%** against its own panel. On a ladder-band panel it scores **83.6%**. The README's
+largest open caveat is closed — not by argument, by measurement.
+
+**2. The headline delta is one opponent.** 44 of the 48 points of the +9.6% mean delta come
+from a single panel member (`ebfc911eaa`, lllleeeo, rank 435: incumbent 51%, winner 95%).
+Against the other four the winner is within two points of the incumbent. The gate's rule is
+"strong against five, weak against one is an exploit"; this is the mirror image, and the
+honest expectation is *a wash plus one favourable matchup*.
+
+**3. All 12 finalists share a worst opponent**, `8f7dd57d5f` (researchstudio.site, rank
+466), at 77–78%. That is not a candidate's exploit — it is a weakness of the strategy class
+the entire 4,315-route corpus contains, and no route in it fixes it. Independent
+confirmation of #31's "the remaining gap is production" from the opposite direction.
+
+**4. Finalist concentration got worse.** 12 finalists across **2 teams**, within a 2.5%
+win-rate spread, against 5 teams in v0.2.6. Route selection really is exhausted.
+
+**5. `corr(recorded cash, mean win rate) = −0.54`** — an order of magnitude stronger than
+the −0.05 measured against the old panel. Filtering the pool by banked cash would have been
+even more damaging than previously thought.
+
+### Limits of this result
+
+- **Ranks are a 2026-08-17 snapshot; the replays are 08-08→08-14.** A team that climbed
+  since is credited for strength its mined route did not have. Kaggle exposes no historical
+  rank, so this is not fixable — only dated, which `logs/team_ranks.json` does.
+- **An open-loop replay of one good episode is not that team's agent.** The panel is
+  representative of the band's *routes*, not of the band's *strength*.
+- **The mid-stage pool is still cut by win rate against the incumbent** (top 150 of 4,315),
+  so a route that beats the band but loses to v0.2.6 never reaches the panel. Fixing that
+  means screening against the panel at 6× compute.
+- **Local gates remain a veto, not a forecast.** Five consecutive versions have now won
+  their local gates; four moved the live score by nothing.

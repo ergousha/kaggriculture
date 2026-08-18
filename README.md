@@ -553,7 +553,7 @@ of them is fixed yet.
 
 ---
 
-## Robust route mining (v0.2.6)
+## Robust route mining (v0.2.7)
 
 The route-replay agent scores well and varies wildly. A fixed 719-step route banks $156k
 on a favourable seed and collapses on an unfavourable one, because shops respawn every 3
@@ -565,14 +565,16 @@ So the stochasticity is handled offline instead of at runtime: mine every route 
 leaderboard has already played, stress-test each one against a panel of strong opponents
 across thousands of simulated markets, and ship the route that wins most reliably.
 
-Four scripts, run in order. **The full runbook, including the daily replay download, is
+Five scripts, run in order. **The full runbook, including the daily replay download, is
 under "Re-running the pipeline" below.**
 
 ```bash
-uv run python mine_replays.py --workers 12          # -> candidates.jsonl
-uv run python simulate_candidates.py --workers 12   # -> logs/simulation_results.jsonl
-uv run python rank_cvar.py --workers 12             # -> logs/cvar_report.json
-uv run python encode_submission.py --write-agent main.py --version 0.2.6
+uv run python scripts/fetch_team_ranks.py --refresh  # -> logs/team_ranks.json
+uv run python mine_replays.py --workers 12           # -> candidates.jsonl
+uv run python simulate_candidates.py --workers 12 \
+    --panel-rank-min 185 --panel-team-top 469        # -> logs/simulation_results.jsonl
+uv run python rank_cvar.py --workers 12              # -> logs/cvar_report.json
+uv run python encode_submission.py --write-agent main.py --version 0.2.7
 ```
 
 `encode_submission.py` refuses to emit unless Phase 3 recorded that the winner beat the
@@ -626,7 +628,64 @@ typically slightly negative even for a strong route: on the worst 5% of seeds it
 - **What is scored is what ships:** the route baked into the real agent template, so the
   three runtime layers (WEED repair, SELL-slot ordering, hands alignment) are in play.
 
-### Results — v0.2.6 (panel run, 7-day corpus)
+### Results — v0.2.7 (leaderboard-band panel, 7-day corpus)
+
+Same corpus as v0.2.6, re-mined so every candidate carries its team's ladder rank:
+4,790 replays (140 GB, 2026-08-08 → 08-14) → 2,541 files with a qualifying seat →
+**4,315 unique candidates, all passing the fidelity gate exactly, zero exclusions, zero
+rejects**. 4,157 of them joined a team on the 2026-08-17 leaderboard (245 teams). Then
+79,980 sieve episodes plus 1,000 held out, with **zero** crashes, timeouts, invalid
+statuses or harness errors.
+
+Panel: ranks 185–469 (2300.2–2599.1 rating), 635 eligible candidates from 42 teams, five
+mined members spanning five distinct teams at `min-dist-to-earlier` 0.99–1.00. No
+saturation warning on the mid or final stage.
+
+Winner: **`044a7741e9`, team "Ueddy", episode 93065370 seat 1**, recorded $89,408.
+
+| | mean win | worst opp | margin CVaR₅ | cash CVaR₅ | cash mean |
+| --- | --- | --- | --- | --- | --- |
+| **Winner, vs 6-opponent panel** | **93.8%** | **77.0%** | −$8,881 | $46,291 | $93,286 |
+| Winner, held out vs 5 common opponents | 93.2% | 79.0% | −$9,533 | — | $90,702 |
+| v0.2.6 incumbent, same held-out grid | 83.6% | 51.0% | −$9,849 | — | $90,013 |
+| **Winner, head-to-head vs v0.2.6, held out** | **96.0%** | — | — | — | $87,019 |
+
+Winner's-curse shrinkage was again negligible: selection 93.8% → held-out 93.2%.
+
+**The incumbent's panel score is now a real number, and that is the headline.** In the
+v0.2.6 run Phase 3 reported the incumbent at **0.2%** against its own panel — an artifact,
+because every member had been selected for beating it. On a panel drawn from the ladder
+instead, the incumbent scores **83.6%**. The measurement that was rigged is no longer
+rigged, which is what this version was for.
+
+**But 92% of the improvement is one opponent.** The +9.6% mean delta decomposes as:
+
+| panel member | team (rank) | winner | incumbent | delta |
+| --- | --- | --- | --- | --- |
+| `ebfc911eaa` | lllleeeo (435) | 95.0% | 51.0% | **+44** |
+| `800dc80f5c` | Eishkaran Singh (222) | 93.0% | 91.0% | +2 |
+| `62b81aa8a3` | Tom3 (195) | 99.0% | 98.0% | +1 |
+| `b8b9267d1c` | HealthStone (204) | 100.0% | 100.0% | 0 |
+| `8f7dd57d5f` | researchstudio.site (466) | 79.0% | 78.0% | +1 |
+
+44 of 48 points come from `ebfc911eaa`; against the other four the winner is within two
+points of the incumbent. The runbook's rule is "a winner strong against five members and
+weak against one is an exploit" — this is the mirror image and carries the same risk. The
+honest expectation is *a wash plus one favourable matchup*, not a 9.6% broad gain.
+
+**Every finalist shares a worst opponent.** All 12 finalists lose most often to
+`8f7dd57d5f` (researchstudio.site, rank 466), at 77–78%. That is not one candidate's
+exploit — it is a systematic weakness of the strategy class the whole corpus contains, and
+no route in 4,315 fixes it. This is the production gap [#31](https://github.com/ergousha/kaggriculture/issues/31)
+describes, visible from the other side.
+
+**`correlation(recorded cash, mean win rate) = −0.54`** across the finalists — the same
+finding as below, but far stronger on this panel than the −0.05 measured against the old
+one. The winner banked $89,408, well below the pool's $103,991 median.
+
+<details>
+<summary>Previous run — v0.2.6, panel selected against the incumbent (superseded)</summary>
+
 
 4,791 replays (140 GB, 2026-08-08 → 08-14) → 2,541 files with a qualifying seat →
 **4,315 unique candidates, all passing the fidelity gate exactly, zero exclusions, zero
@@ -655,6 +714,8 @@ includes it as a step.
 The worst-opponent column earns its place. Finalist #4 averages 85.7% but wins only
 **50.0%** against one panel member, and #8 averages 78.5% with a **10.0%** worst case —
 both single-opponent exploits that a mean-only ranking would have promoted.
+
+</details>
 
 <details>
 <summary>Previous run — v0.2.5, cash-CVaR₅ selection (superseded)</summary>
@@ -813,32 +874,37 @@ against a single member — an exploit the old metric would have shipped.
 
 ### Caveats
 
-- **Offline win rates are still optimistic.** The v0.2.5 run read 97% offline and delivered
-  ~47% live. This run reads 92.6% mean / 84.0% worst-case against a 6-opponent panel, which
-  is a far better-conditioned measurement, but it is still a panel of six against a live
-  field of hundreds. Expect the live figure to land below the offline one; the open
-  question is by how much.
-- **The panel was selected against the incumbent** (fixed in v0.2.7 — see "Aiming the
-  panel at the ladder"). Under `--panel-source screen-top` members are drawn from the top
-  screen performers, and the screen ranks by win rate against the incumbent anchor — so
-  all six beat it ~100% by construction. This inflates Phase 3's headline delta and makes
-  the incumbent's panel score meaningless. Always read the direct head-to-head instead;
-  the runbook has it as an explicit step. Widening `--panel-from-top` dilutes but does not
-  remove the bias.
-- **It does not fix the tail.** Margin CVaR₅ is **−$923** even head-to-head against the
-  incumbent: on the worst 5% of seeds the winner still loses. Cash CVaR₅ improved to
-  $46,776 from v0.2.5's $40,887 on the same seeds, so the floor rose — but a floor of
-  ~$47k against a mean of ~$94k is still a wide distribution. Mining finds more robust
-  routes, not robust ones.
+- **Offline win rates are still optimistic.** v0.2.5 read 97% offline and delivered ~47%
+  live; v0.2.6 read 92.6%/84.0% and plateaued at ~2290. v0.2.7 reads 93.8% mean / 77.0%
+  worst against a panel drawn from our own rating band, which is the best-conditioned
+  measurement this pipeline has produced — but it is still six opponents standing in for a
+  live field of hundreds. Expect the live figure below the offline one.
+- **The panel used to be selected against the incumbent — fixed in v0.2.7, and measured.**
+  Under `--panel-source screen-top` members come from the top screen performers, and the
+  screen ranks by win rate against the incumbent anchor, so all six beat it ~100% by
+  construction: v0.2.6's Phase 3 scored the incumbent at **0.2%** against its own panel.
+  On the v0.2.7 ladder-band panel the incumbent scores **83.6%**. Run the direct
+  head-to-head anyway — it is the cleanest read and the runbook has it as a step.
+- **A panel of six cannot tell you which of its members the live field contains.** v0.2.7's
+  entire +9.6% edge over the incumbent sits on one of the five (`ebfc911eaa`, +44 points;
+  the rest are within two). A panel makes single-opponent exploits *visible*; it does not
+  stop the selected route from having one.
+- **It does not fix the tail, and the tail against our own band is deep.** Margin CVaR₅ is
+  **−$9,533** held out — on the worst 5% of seeds the winner loses by ~$9.5k. That is far
+  worse than v0.2.6's −$923, and it is not a regression: the old figure was measured
+  against a panel of routes selected for losing to the incumbent. −$9.5k is what the tail
+  costs against the band we are actually matched into. Cash CVaR₅ (~$46k against a ~$91k
+  mean) is still a wide distribution. Mining finds more robust routes, not robust ones.
 - **Seed distribution is an assumption.** Local seeds are sequential integers; Kaggle
   assigns each episode a seed we cannot observe or reproduce. All market randomness comes
   from `random.Random((seed * 1_000_003) ^ day)`, so these seeds do span the shop-draw
   space, but nothing here can verify the distributions match. `--seed-mode random31`
   samples the same 31-bit range the engine's own fallback uses, as a second read.
-- **Finalist concentration is better but not gone.** The 12 finalists span 5 teams
-  (Ueddy 5, "somewhere after" 3, Arda Ceylan 2, one each from Utkarsh #2 and Shadow),
-  against 18-of-20 from a single team in the v0.2.5 run. A shared strategy class can still
-  share a failure mode the panel does not contain.
+- **Finalist concentration got worse, and the failure mode is now visible.** v0.2.7's 12
+  finalists span **2 teams** (Kostiantyn Isaienkov 8, Ueddy 4), against 5 teams in v0.2.6
+  and 18-of-20 from one team in v0.2.5, and their win rates sit within a 2.5% spread — the
+  selection is choosing between near-identical routes. The shared failure mode is no longer
+  hypothetical: all 12 lose most often to the *same* panel member, at 77–78%.
 - **Local results have not historically predicted the ladder.** Four consecutive versions
   won their local paired-seed gates and moved the live score by nothing. Treat every number
   above as a veto, not a forecast.
