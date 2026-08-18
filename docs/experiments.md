@@ -910,3 +910,91 @@ even more damaging than previously thought.
   means screening against the panel at 6× compute.
 - **Local gates remain a veto, not a forecast.** Five consecutive versions have now won
   their local gates; four moved the live score by nothing.
+
+---
+
+## v0.2.8 — sell acceleration: two bugs, then a clean negative (Issue #25, PR #35)
+
+The fourth runtime layer #25 specified: a product already sitting in the shed is sold now
+rather than when the route's schedule gets round to it, capped by the volume the route
+itself still has scheduled for it. #23 had already measured it as +$61 and within noise,
+and #25 said in its title not to spend a submission on it alone.
+
+The first cut shipped two defects and one wrong conclusion.
+
+### Bug 1: the layer sold a farm input, and the ladder did not notice
+
+#25's second safety rule is "never sell an input", and it names `WHEAT` — the route buys
+351 units of it as feed. `WHEAT` was excluded. But `FERTILIZER` is an input too, and it is
+not bought, it is *produced*: 306 `COLLECT_FERTILIZER` calls put it in a unit's carried
+inventory, it is deposited to the shed, and then **14 `PICKUP FERTILIZER` calls lift 95
+units back out** to feed 64 `FERTILIZE` calls. `_inv_take` reads carried inventory and
+`PICKUP` fills it from `private["shed"]`, so draining the shed starves the fertilizer
+chain. Fertilizer is also 1,907 of the route's 2,772 non-wheat SELL units — 69% of the
+accelerated budget, not a corner case.
+
+Measured over 30 paired seeds vs `opponents/v0_2_6.py` (base seed 3000000, seats
+alternated), against the v0.2.7 incumbent:
+
+| | mean cash | win rate | no-op `FERTILIZE` |
+| --- | --- | --- | --- |
+| v0.2.7 incumbent | $86,515 | 96.7% (29W-1L) | 9 |
+| v0.2.8 as first written | $83,146 | **16.7%** (5W-25L) | **282** |
+
+**`scripts/rank_ladder.py --episodes 1 --require-perfect` returned 10/10 on that build.**
+The ladder cannot see an 80-point win-rate collapse against a peer, because every rung it
+contains is $45k weaker than we are. It is a crash test, not a strength test.
+
+The fix generalises #25's rule instead of adding a second hardcoded item: precompute
+`_PICKUP_SUFFIX_SUMS`, the per-item suffix sum of what the route still lifts out of the
+shed, and reserve it before accelerating. That is derived from the route, so it survives
+the next route swap — a blanket `FERTILIZER` exclusion would not have.
+
+### Bug 2: the emitted template no longer matched the emitted agent
+
+`AGENT_TEMPLATE` was missing the two blank lines PEP8 wants before a top-level `def`, so
+`build_route_agent.py` and `encode_submission.py` emitted an agent that fails
+`ruff format --check`. Repo CI passed only because `main.py` had been formatted by hand
+after generation. `scripts/build_route_agent.py` now round-trips to `main.py` byte for
+byte; that equality is worth re-checking whenever the template changes.
+
+### The result, with the bugs out of the way
+
+Paired A/B of the layer ON vs OFF — same file, `budget` forced empty for OFF — 30 paired
+seeds each, base seed 3000000, seats alternated:
+
+| opponent | strength | ON − OFF | ON better on | p | shed overflow ON → OFF |
+| --- | --- | --- | --- | --- | --- |
+| `opponents/v0_2_6.py` | peer, ~$86k | **−$1,680** | **0/30** | **~0.0** | 10 → 45 |
+| `closer_cleo` (tier 9) | ~$26k | +$382 | 17/30 | 0.011 | 17 → 53 |
+| `slotter_silas` (tier 8) | ~$26k | +$290 | 19/30 | 0.052 | 4 → 33 |
+| `broker_bea` (tier 6) | ~$26k | −$174 | 12/30 | 0.148 | 0 → 30 |
+
+The shed-overflow saving #25 promised is real and large — it survives every opponent, and
+it is the only claim in #25 that does. The cash claim does not. Against the ladder the
+layer is a wash to +$400; against the only peer-strength opponent available it loses
+**$1,680 on every single one of 30 seeds**, t = −8.1.
+
+**Why the sign flips with opponent strength.** `_process_market` runs both players'
+order *i* in per-unit lockstep against one shared inventory, and README's own price table
+says the market *rises* over 30 days — MILK $160 → $329, never retracing. Selling early is
+therefore selling cheap, and the cost is only paid when someone else is still selling into
+the recovered market later. A tier-6 bot banks $26k and never gets there; `v0_2_6` does.
+The leaderboard is made of peers, not of tier-6 bots, so the peer column is the one that
+forecasts.
+
+This is the same shape as #23's deferral result read backwards: the route is a cash
+schedule, and *both* directions of moving a sale off its scheduled turn cost money — a
+late sale starves the next HIRE, an early one sells into a market that had not risen yet.
+#30 (move the BUY schedule with the sale schedule) remains the only version of this idea
+that could work.
+
+### Verdict
+
+The layer is correct now and it fails #25's own gate — "not worse on win rate vs
+`opponents/v0_2_6.py`" — 0 seeds out of 30. It should not ship. `_accelerate_sells` with
+`budget` empty is bit-identical in behaviour to v0.2.7's `_rank_sells`, and reproduces its
+$86,513 / 96.7% exactly, so reverting the behaviour is a one-line change.
+
+Count for the record: this is the tenth of twelve structural changes to `main.py` to lose
+paired seeds.
