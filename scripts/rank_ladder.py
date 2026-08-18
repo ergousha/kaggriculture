@@ -152,7 +152,7 @@ def main() -> None:
     parser.add_argument("--tiers", default="0-9", help="e.g. 0-5 or 4,5,6")
     parser.add_argument("--fetch", action="store_true", help="download the dataset and exit")
     parser.add_argument(
-        "--require-perfect", action="store_true", help="exit with code 1 if not 100% win rate"
+        "--require-perfect", action="store_true", help="exit with code 1 if not 100%% win rate"
     )
     args = parser.parse_args()
 

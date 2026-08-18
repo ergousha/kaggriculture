@@ -106,6 +106,26 @@ _MARKET_PARAMS = {{
     "FERTILIZER": (100, 200, "linear", 0.40, "linear", 0.40),
 }}
 
+def _is_sell(order):
+    return (
+        isinstance(order, list)
+        and len(order) >= 3
+        and order[0] == "SELL"
+        and order[1] in _MARKET_PARAMS
+    )
+
+_SELL_SUFFIX_SUMS: list[dict[str, int]] = [{{}} for _ in range(len(_ROUTE))]
+_current_sums: dict[str, int] = {{}}
+for _t in range(len(_ROUTE) - 1, -1, -1):
+    for _order in _ROUTE[_t].get("market") or []:
+        if _is_sell(_order) and _order[1] != "WHEAT":
+            try:
+                _qty = max(0, int(_order[2]))
+                _current_sums[_order[1]] = _current_sums.get(_order[1], 0) + _qty
+            except (ValueError, TypeError):
+                pass
+    _SELL_SUFFIX_SUMS[_t] = dict(_current_sums)
+
 # Per-seat repair state. The env builds a fresh process per episode, but a seat
 # can still be re-entered, so this resets whenever `step` goes backwards.
 _REPAIR: dict = {{0: {{}}, 1: {{}}}}
@@ -263,15 +283,6 @@ def _price_at(item, inventory):
     return max(_PRICE_FLOOR, round(price))
 
 
-def _is_sell(order):
-    return (
-        isinstance(order, list)
-        and len(order) >= 3
-        and order[0] == "SELL"
-        and order[1] in _MARKET_PARAMS
-    )
-
-
 def _impact(obs, order):
     """How much this order moves its own price, times its size."""
     try:
@@ -286,16 +297,66 @@ def _impact(obs, order):
     return float(quantity) * max(0.0, now - after)
 
 
-def _rank_sells(obs, action):
-    """Reorder SELL orders among the slots they already occupy. Sizes, items and
-    every non-SELL order stay exactly where the route put them."""
+def _accelerate_sells(obs, action, step):
+    """Sell acceleration and ranking: sell products currently in the shed if they
+    are scheduled to be sold later, up to the route's remaining budget for them.
+    Ranks all SELL orders by price impact and preserves all non-SELL slots."""
     market = list(action.get("market") or [])
-    sells = [(i, o) for i, o in enumerate(market) if _is_sell(o)]
-    if len(sells) < 2:
+    shed = _get(_get(obs, "private", {{}}) or {{}}, "shed", {{}}) or {{}}
+
+    new_market = [None] * len(market)
+    route_sells = {{}}
+
+    for i, order in enumerate(market):
+        if _is_sell(order):
+            item = order[1]
+            try:
+                qty = max(0, int(order[2]))
+                route_sells[item] = route_sells.get(item, 0) + qty
+            except (ValueError, TypeError):
+                pass
+        else:
+            new_market[i] = order
+
+    budget = _SELL_SUFFIX_SUMS[step] if step < len(_SELL_SUFFIX_SUMS) else {{}}
+    sells_to_place = []
+
+    items = set(route_sells.keys())
+    for item, qty_in_shed in shed.items():
+        if item != "WHEAT" and item in budget and qty_in_shed > 0:
+            items.add(item)
+
+    for item in items:
+        route_qty = route_sells.get(item, 0)
+        shed_qty = int(shed.get(item, 0) or 0)
+        max_budget = budget.get(item, 0)
+        accelerated = min(shed_qty, max_budget) if item != "WHEAT" else 0
+        final_qty = max(route_qty, accelerated)
+
+        if final_qty > 0:
+            sells_to_place.append(["SELL", item, final_qty])
+
+    if not sells_to_place and len(market) == len(action.get("market") or []):
         return action
-    ranked = sorted(sells, key=lambda pair: (-_impact(obs, pair[1]), pair[0]))
-    order_iter = iter(o for _, o in ranked)
-    action["market"] = [next(order_iter) if _is_sell(o) else o for o in market]
+
+    sells_to_place.sort(key=lambda order: (-_impact(obs, order), order[1]))
+
+    sell_idx = 0
+    for i in range(len(new_market)):
+        if new_market[i] is None:
+            if sell_idx < len(sells_to_place):
+                # pyrefly: ignore [unsupported-operation]
+                new_market[i] = sells_to_place[sell_idx]
+                sell_idx += 1
+
+    final_market = [o for o in new_market if o is not None]
+
+    while sell_idx < len(sells_to_place) and len(final_market) < 10:
+        # pyrefly: ignore [bad-argument-type]
+        final_market.append(sells_to_place[sell_idx])
+        sell_idx += 1
+
+    action["market"] = final_market
     return action
 
 
@@ -304,7 +365,7 @@ def agent(obs, config=None):
         step = _step_index(obs, config)
         action = _copy_action(_route_at(step))
         action = _repair_weeds(obs, action, step)
-        action = _rank_sells(obs, action)
+        action = _accelerate_sells(obs, action, step)
         return _align_hands(action, obs)
     except Exception:
         try:
