@@ -90,7 +90,7 @@ def test_never_adds_an_order_from_the_shed() -> None:
 
 
 def test_non_sell_orders_keep_their_slots() -> None:
-    market = [
+    market: list[list[Any]] = [
         ["SELL", "MILK", 5],
         ["HIRE"],
         ["SELL", "MELON", 50],
@@ -108,7 +108,12 @@ def test_non_sell_orders_keep_their_slots() -> None:
 
 def test_sells_are_ordered_by_descending_price_impact() -> None:
     obs = _obs()
-    market = [["SELL", "CARROT", 3], ["HIRE"], ["SELL", "MELON", 60], ["SELL", "MILK", 20]]
+    market: list[list[Any]] = [
+        ["SELL", "CARROT", 3],
+        ["HIRE"],
+        ["SELL", "MELON", 60],
+        ["SELL", "MILK", 20],
+    ]
     action = {"farmer": ["PASS"], "hands": [], "market": [list(o) for o in market]}
     out = AGENT._rank_sells(obs, action)["market"]
 
