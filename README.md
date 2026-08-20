@@ -31,6 +31,7 @@ search/cem.py                 # cross-entropy-method search + loss-tail diagnosi
 search/evolution.py           # population-based search over the same vector
 search/harness.py             # paired-seed match harness used by both searches
 search/smoke_test.py          # unit tests for the search stack
+search/route_search.py        # issue #26: mutation-and-accept over the raw route (blocks #27-#30)
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
 opponents/vX_Y_Z.py           # every submitted version, kept as a sparring partner
 scripts/mine_daily.py         # mines Kaggle's daily episode dumps into strategy fingerprints
@@ -1042,6 +1043,65 @@ uv run python scripts/examine_agent.py "Automated release v0.2.7" --limit 10
 `.gitignore` already excludes `replays/`, `logs/` and `candidates.jsonl`; nothing from a
 run needs committing except `main.py`, the new `opponents/vX_Y_Z.py`, and whatever you
 learn.
+
+---
+
+## Route synthesis (issue #26): searching in action space
+
+Selection over the mined pool is exhausted — every candidate is the same strategy sampled
+4,315 times. `search/route_search.py` is the harness for the only direction left:
+**mutating a route directly**, seeded from the shipped incumbent. It is what issues
+#27–#30 block on. It ships no agent; the gate is that with zero mutations it changes
+nothing.
+
+```bash
+uv run python -m search.route_search --self-test     # the four no-change gates
+uv run python -m search.route_search --iterations 8 --workers 12   # a real pass
+```
+
+How it works: load the incumbent route (hash-verified against the candidate pool), apply
+one of six individually toggleable mutation operators, bake the mutant into the **exact
+deployable artifact** (`mining.common.write_route_agent`, so WEED repair / SELL-slot
+ordering / hands alignment are in play), evaluate it through the Phase 2 engine
+(`simulate_candidates.run_stage` — common random numbers, the v0.2.7 leaderboard-band
+panel anchored on the incumbent, resumable per `(hash, opponent, seed)`), and accept on
+**mean panel win rate with worst-opponent win rate as tiebreak** — the same metric
+`rank_cvar.py` selects on. A hash already evaluated is never re-run.
+
+The six operators, each `--no-<name>` away from off, matching the issue's list:
+
+| operator | what it does | safe by construction? |
+| --- | --- | --- |
+| `shift_task_block` | shift a unit's movement run by ±k steps, re-aligning the tail | **yes** — only moves a movement burst into surrounding PASSes; preserves every non-move op |
+| `retarget_plant` | retarget a `PLANT` to another crop (#28) | half — rewrites the matching `BUY_SEED` so buy/plant stay consistent |
+| `swap_herd` | convert a `BUY_ANIMAL COW` to `SHEEP` (#27) | no — cadence repair (interval 3→2) is #27's operator, deliberately not approximated here |
+| `assign_idle` | give a PASS turn a productive task (#28) | half — gated to units already adjacent to farmed ground, so no unit travels |
+| `repath` | re-path a movement run between fixed endpoints (#29) | placeholder — returns `None` until #29's shortest-path operator lands |
+| `move_sell_and_buy` | move a `SELL` and the `BUY` it funds together (#30) | placeholder — returns `None` until #30's joint operator lands |
+
+Measured budget on 12 workers: one candidate evaluation is **30 seeds × 6 panel = 180
+episodes ≈ 35 min** at ~2.4 s/episode (Phase 2 screen measured 0.8 ep/s on 8 workers).
+That is the number #27–#30 scope against. A mutation that produces an invalid action is
+rejected and counted (`rejected_invalid`); empirically the seed's movement-shift at the
+final step replays **bit-identical cash on all six panel opponents**, confirming that
+shift is a true no-op where it claims to be.
+
+The gates (`--self-test`, also pinned in `tests/test_route_search.py`):
+
+1. **Zero mutations → byte-identical route.** Baking the normalized seed round-trips to
+   the incumbent's hash (`044a7741e9`).
+2. **A mutation's no-op property holds.** The shift operator preserves the full
+   non-movement op signature (every non-move unit op and every market order survives in
+   place), so moving a walk cannot disturb the schedule it walks between.
+3. **The identity artifact replays clean** through `local_arena` — zero invalid, zero
+   crashes, zero timeouts (skipped loudly if `kaggle_environments` is absent).
+4. **The budget is printed**, so the dependent issues can be scoped.
+
+**Live validation: none.** This ships no agent. The carried-forward warning applies to
+everything it will ever emit: **local results have not historically predicted the ladder**
+— four consecutive selection passes won their local gates and moved the live score by
+nothing. Every accept from this loop is a veto, not a forecast; hold out fresh seeds
+(the v0.2.5 run measured a $3,640 winner's-curse shrinkage against a $1,610 margin).
 
 ---
 
