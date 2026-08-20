@@ -362,7 +362,11 @@ def op_swap_herd(
     market = new[buy_step].get("market") or []
     # Check if a SHEEP buy order already exists in this market step
     existing_sheep_order = next(
-        (o for o in market if isinstance(o, list) and len(o) >= 3 and o[0] == "BUY_ANIMAL" and o[1] == "SHEEP"),
+        (
+            o
+            for o in market
+            if isinstance(o, list) and len(o) >= 3 and o[0] == "BUY_ANIMAL" and o[1] == "SHEEP"
+        ),
         None,
     )
     for order in market:
@@ -404,12 +408,10 @@ def op_swap_herd(
     for step in range(len(new)):
         mkt = new[step].get("market") or []
         has_milk_sell = any(
-            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "MILK"
-            for o in mkt
+            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "MILK" for o in mkt
         )
         has_wool_sell = any(
-            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "WOOL"
-            for o in mkt
+            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "WOOL" for o in mkt
         )
         if has_milk_sell and not has_wool_sell and len(mkt) < 10:
             mkt.append(["SELL", "WOOL", 6])
