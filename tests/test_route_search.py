@@ -94,16 +94,16 @@ class TestOperators(unittest.TestCase):
 
     def test_swap_herd_operator_converts_cows_and_integrates_wool(self) -> None:
         cows_before, sheep_before = rs._herd_counts(self.seed)
-        self.assertEqual(cows_before, 10)
-        self.assertEqual(sheep_before, 4)
+        self.assertEqual(cows_before, 9)
+        self.assertEqual(sheep_before, 5)
 
         out = rs.op_swap_herd(copy.deepcopy(self.seed), self.rng)
         self.assertIsNotNone(out)
         assert out is not None
         mutated, note = out
         cows_after, sheep_after = rs._herd_counts(mutated)
-        self.assertEqual(cows_after, 9)
-        self.assertEqual(sheep_after, 5)
+        self.assertEqual(cows_after, 8)
+        self.assertEqual(sheep_after, 6)
         self.assertIn("converted COW #", note)
         self.assertIn("wool sells integrated", note)
 
