@@ -111,7 +111,12 @@ class TestOperators(unittest.TestCase):
         wool_sells = 0
         for action in mutated:
             for order in action.get("market") or []:
-                if isinstance(order, list) and len(order) >= 3 and order[0] == "SELL" and order[1] == "WOOL":
+                if (
+                    isinstance(order, list)
+                    and len(order) >= 3
+                    and order[0] == "SELL"
+                    and order[1] == "WOOL"
+                ):
                     wool_sells += 1
         self.assertGreater(wool_sells, 0)
 
