@@ -42,7 +42,7 @@ jobs:
         run: |
           uv run mypy submit.py main.py local_arena.py \
             mine_replays.py simulate_candidates.py rank_cvar.py encode_submission.py \
-            mining/ tests/
+            mining/ tests/ search/
 
       - name: Run Test Suite
         run: |

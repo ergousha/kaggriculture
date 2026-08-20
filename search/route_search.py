@@ -62,6 +62,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 # The Phase 2 harness is the engine: it owns env construction, seeded
 # configuration, the (candidate, opponent, seed) resume key and the status
@@ -567,7 +568,7 @@ def run_search(
 
     incumbent_route = seed_route
     incumbent_score = evaluate(incumbent_route, panel, seeds, workers, results_path, state)
-    log = [
+    log: list[dict[str, Any]] = [
         {
             "iter": 0,
             "hash": _hash_of(seed_route),
@@ -735,7 +736,7 @@ def _nonmove_signature(route: list[dict]) -> set:
     A movement shift must be invisible to this signature — that is what makes it
     a no-op by construction, and what gate 2 verifies.
     """
-    sig = set()
+    sig: set[tuple[int, Any, tuple[Any, ...]]] = set()
     for step, action in enumerate(route):
         for slot, unit in enumerate(_units(action)):
             op = _op_of(unit)
