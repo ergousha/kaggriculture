@@ -64,13 +64,18 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+# Ensure project root is in sys.path when invoked directly
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 # The Phase 2 harness is the engine: it owns env construction, seeded
 # configuration, the (candidate, opponent, seed) resume key and the status
 # accounting. Importing it keeps this harness and Phase 2 from ever disagreeing
 # about what "evaluate a route" means.
-import simulate_candidates as phase2
-from mining import common
-from mining.common import PROJECT_ROOT, decode_route_b85
+import simulate_candidates as phase2  # noqa: E402
+from mining import common  # noqa: E402
+from mining.common import PROJECT_ROOT, decode_route_b85  # noqa: E402
 
 SEED_CANDIDATE_PREFIX = "044a7741e9"  # v0.2.7 incumbent, issue #26 names this seed
 RESULTS_PATH = os.path.join(PROJECT_ROOT, "logs", "route_search_results.jsonl")
@@ -305,46 +310,114 @@ def _herd_counts(route: list[dict]) -> tuple[int, int]:
     return cows, sheep
 
 
-def op_swap_herd(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | None:
-    """Convert a BUY_ANIMAL COW to SHEEP and repair the downstream chore cadence.
+COW_SCHEDULE: list[tuple[int, int, tuple[int, int], tuple[int, int], tuple[int, int]]] = [
+    # (cow_idx, buy_step, (pickup_step, pickup_slot), (place_step, place_slot), pasture_coord)
+    (0, 0, (3, 3), (4, 3), (4, 4)),
+    (1, 0, (10, 3), (12, 3), (3, 4)),
+    (2, 73, (77, 4), (80, 4), (2, 4)),
+    (3, 120, (125, 4), (128, 4), (4, 2)),
+    (4, 168, (170, 8), (171, 8), (5, 4)),
+    (5, 168, (174, 6), (176, 6), (6, 4)),
+    (6, 216, (221, 3), (227, 3), (5, 2)),
+    (7, 216, (223, 11), (227, 11), (7, 4)),
+    (8, 264, (267, 2), (268, 2), (4, 5)),
+    (9, 264, (267, 3), (275, 3), (3, 5)),
+]
 
-    This is #27's lever. COW interval is 3, SHEEP interval is 2, so the swapped
-    animal needs its FEED/CARE/COLLECT_FERTILIZER cadence compressed from every
-    3rd day to every 2nd — the repair pass re-emits those chores on the new
-    cadence and leaves movement to the re-path operator. Adding animals where the
-    route had none is safe by construction (nothing depended on their absence);
-    *swapping* changes chore timing and is speculative.
+
+def op_swap_herd(
+    route: list[dict], rng: Any = None, cow_idx: int | None = None, **_kw: Any
+) -> tuple[list[dict], str] | None:
+    """Convert a BUY_ANIMAL COW to SHEEP, update placement, and integrate wool sells.
+
+    This is #27's lever. Finds an existing COW in the route, updates its buy order
+    to SHEEP, swaps its unit PICKUP/PLACE actions from COW to SHEEP, and adds
+    SELL WOOL market orders alongside MILK sells so harvested wool is monetized.
     """
-    cows, sheep = _herd_counts(route)
-    if cows == 0:
+    convertible: list[int] = []
+    for c_idx, _buy_step, (p_step, p_slot), (_pl_step, _pl_slot), _pasture in COW_SCHEDULE:
+        if p_slot == 0:
+            act = route[p_step].get("farmer")
+        else:
+            hands = route[p_step].get("hands") or []
+            act = hands[p_slot - 1] if p_slot - 1 < len(hands) else None
+        if act and len(act) >= 2 and act[0] == "PICKUP" and act[1] == "COW":
+            convertible.append(c_idx)
+
+    if not convertible:
         return None
+
+    if cow_idx is not None and cow_idx in convertible:
+        chosen_idx = cow_idx
+    elif rng is not None and hasattr(rng, "randrange"):
+        chosen_idx = convertible[rng.randrange(len(convertible))]
+    else:
+        chosen_idx = convertible[0]
+
+    idx, buy_step, (p_step, p_slot), (pl_step, pl_slot), pasture = COW_SCHEDULE[chosen_idx]
+
     new = copy.deepcopy(route)
-    converted = False
-    for action in new:
-        for order in action.get("market") or []:
-            if (
-                isinstance(order, list)
-                and len(order) >= 3
-                and order[0] == "BUY_ANIMAL"
-                and order[1] == "COW"
-            ):
-                order[1] = "SHEEP"
-                converted = True
-                break
-        if converted:
+
+    # 1. Update buy order
+    market = new[buy_step].get("market") or []
+    # Check if a SHEEP buy order already exists in this market step
+    existing_sheep_order = next(
+        (o for o in market if isinstance(o, list) and len(o) >= 3 and o[0] == "BUY_ANIMAL" and o[1] == "SHEEP"),
+        None,
+    )
+    for order in market:
+        if (
+            isinstance(order, list)
+            and len(order) >= 3
+            and order[0] == "BUY_ANIMAL"
+            and order[1] == "COW"
+        ):
+            qty = int(order[2])
+            if existing_sheep_order is not None:
+                existing_sheep_order[2] = int(existing_sheep_order[2]) + 1
+                if qty == 1:
+                    market.remove(order)
+                else:
+                    order[2] = qty - 1
+            else:
+                if qty == 1:
+                    order[1] = "SHEEP"
+                elif qty > 1:
+                    order[2] = qty - 1
+                    if len(market) < 10:
+                        market.append(["BUY_ANIMAL", "SHEEP", 1])
             break
-    if not converted:
-        return None
-    # Cadence repair (compressing 3-day chores to 2-day) is deliberately NOT
-    # approximated here. A wrong repair is worse than none: an over-scheduled
-    # FEED silently no-ops, which reads as a herd that starves for no reason.
-    # The interpreter tolerates the original cadence against a sheep (it just
-    # feeds late), so the swap alone is a legal, measurable mutation; the
-    # cadence compression is #27's dedicated operator, and its gate is that
-    # realised $/unit does not collapse — not something this harness can guess.
+
+    # 2. Update pickup
+    if p_slot == 0:
+        new[p_step]["farmer"] = ["PICKUP", "SHEEP", 1]
+    else:
+        new[p_step]["hands"][p_slot - 1] = ["PICKUP", "SHEEP", 1]
+
+    # 3. Update place
+    if pl_slot == 0:
+        new[pl_step]["farmer"] = ["PLACE", "SHEEP", 1]
+    else:
+        new[pl_step]["hands"][pl_slot - 1] = ["PLACE", "SHEEP", 1]
+
+    # 4. Integrate SELL WOOL orders across the route
+    for step in range(len(new)):
+        mkt = new[step].get("market") or []
+        has_milk_sell = any(
+            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "MILK"
+            for o in mkt
+        )
+        has_wool_sell = any(
+            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == "WOOL"
+            for o in mkt
+        )
+        if has_milk_sell and not has_wool_sell and len(mkt) < 10:
+            mkt.append(["SELL", "WOOL", 6])
+
+    cows, sheep = _herd_counts(new)
     return (
         new,
-        f"converted one BUY_ANIMAL COW->SHEEP (herd was {cows}c/{sheep}s; cadence left at interval 3, #27 compresses it)",
+        f"converted COW #{chosen_idx} to SHEEP @ pasture {pasture} (herd is now {cows}c/{sheep}s; wool sells integrated)",
     )
 
 

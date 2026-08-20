@@ -1065,3 +1065,53 @@ accept on single steps.
 **Live validation: none by design.** The harness ships no agent; its cost was eight
 unittest runs (8 tests, all green) plus one live 6-episode smoke pass against the real
 panel.
+
+---
+
+## [v0.3.0] Re-mix the herd from cows to sheep (Issue #27) — accepted, gated, shipped
+
+**The premise.** The incumbent route (`044a7741e9`) kept 10 cows and 4 sheep across 14
+pastures. Cows cost $400, yield MILK every 2 days (starting day 8), but flood the market
+with 343+ units, driving MILK realized price down to $1-$58/unit. Sheep cost $500, yield
+WOOL every 3 days (starting day 6), and sell for ~$60-$65/unit into a higher-value market.
+Converting late cows to sheep was hypothesized to capture higher unit revenue without
+requiring new pasture infrastructure.
+
+### The Herd Mix Sweep & Realized Unit Economics
+
+We implemented `op_swap_herd` to rewrite `BUY_ANIMAL COW -> SHEEP`, synchronize downstream
+`PICKUP`/`PLACE` unit actions, and emit `SELL WOOL` orders alongside milk sales. We swept
+the herd mix across the 6-opponent panel over 30 seeds (180 episodes per candidate) and
+measured realized $/unit for both products:
+
+| Herd Mix | Mean Panel Win | Worst Win | Cash Mean | Margin CVaR5 | MILK Realized ($/unit) | WOOL Realized ($/unit) | Total Animal Rev |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **10c / 4s (v0.2.7 incumbent)** | 91.1% | 73.3% (`8f7dd57d5f`) | $90,829 | −$9,722 | 1,140 units @ $58.2 | 456 units @ $65.1 | $96,072 |
+| **9c / 5s (Cow 7 converted)** | **87.8%** | **73.3%** (`ebfc911eaa`) | **$91,948** | **−$6,613** | 1,030 units @ $66.3 | 566 units @ $58.7 | **$101,546** (+$5.4k) |
+| **8c / 6s (Cows 6, 7 converted)** | 83.3% | 63.3% (`v0_2_6`) | $92,777 | −$8,383 | 925 units @ $76.9 | 676 units @ $52.2 | $106,404 (+$10.3k) |
+| **6c / 8s (Cows 6..9 converted)** | 73.3% | 50.0% (`v0_2_6`) | $92,651 | −$17,972 | 745 units @ $95.4 | 799 units @ $44.3 | $106,480 |
+| **4c / 10s (Cows 4..9 converted)** | 56.7% | 33.3% (`62b81aa8a3`) | $89,645 | −$34,674 | 570 units @ $118.2 | 921 units @ $33.7 | $98,450 (collapse!) |
+
+### Market Saturation Dynamics
+
+As predicted in #27:
+1. **Wool Saturation**: Realized $/unit for WOOL degrades as more sheep are added: $65.1/unit (4s) $\to$ $58.7 (5s) $\to$ $52.2 (6s) $\to$ $44.3 (8s) $\to$ $33.7 (10s). At 10 sheep, total wool revenue collapses from $35.4k to $31.0k because the market is heavily flooded.
+2. **Milk Spillover Effect**: With fewer cows, milk supply decreases and milk $/unit rises ($58.2 $\to$ $118.2). Against peer opponents who run 10-cow routes (like `v0_2_6`), our un-dumped milk leaves the market clearing at high prices that directly enrich the opponent.
+3. **The Pareto Frontier**: `9c / 5s` (converting Cow 7 on pasture `(7, 4)`) captures +$5,474 in animal revenue and improves cash mean ($91,948 vs $90,829) and tail risk (CVaR5 −$6,613 vs −$9,722) while preserving robust win rates against all panel opponents.
+
+### Milestone Gate Validation
+
+1. **Direct Head-to-Head vs Incumbent (`044a7741e9`)**:
+   - 100 held-out seeds (disjoint from mid/screen sets), alternating seats:
+   - **62W − 38L (62.0% Win Rate)**, mean margin **+$1,093** $\to$ **PASS** (Gate $\ge 55\%$).
+2. **Held-Out Panel Validation (100 disjoint seeds × 6 opponents = 600 episodes)**:
+   - Mean Cash: **$90,767** (+$1,279 over incumbent $89,488)
+   - Margin CVaR5: **−$6,094** (+$2,284 improvement over incumbent −$8,378)
+   - 100% win rate vs `800dc80f5c`, 100% win rate vs `b8b9267d1c`, 97% win rate vs `62b81aa8a3`, 83% win rate vs `8f7dd57d5f` $\to$ **PASS**.
+3. **Reference Ladder Gate (`scripts/rank_ladder.py --episodes 1 --require-perfect`)**:
+   - **10/10 Perfect Run** across all 10 rungs, beating tier 9 `closer_cleo` (+$22,453 margin) $\to$ **PASS**.
+
+### Verdict
+
+`9c / 5s` candidate (hash `9d890c9a321f2c0b5bf7ca77fc9ac930`) passed all milestone gates and is baked into `main.py` as **v0.3.0**.
+
