@@ -1008,3 +1008,60 @@ that make the SELL layer safe, and `tests/test_agent_template.py`, which fails i
 
 Count for the record: this is the tenth of twelve structural changes to `main.py` to lose
 paired seeds.
+
+---
+
+## Route synthesis harness (Issue #26) — built, gated, shipped no agent
+
+The end of "route selection is exhausted" is a tool, not a route: with every one of
+4,315 candidates the same strategy, the only direction with a five-figure target is
+optimising a route directly. `search/route_search.py` is that harness — a
+mutation-and-accept loop over the 719-step action stream, seeded from the v0.2.7
+incumbent (`main.py._ROUTE`, hash `044a7741e9`, round-trips exactly through the pool).
+
+**What it verifies before it is trusted (the "changes nothing" gates):**
+
+| gate | check | result |
+| --- | --- | --- |
+| 1. identity | zero mutations -> baked route byte-identical to the seed | PASS — hash round-trips |
+| 2. round-trip | the no-op shift preserves the full non-movement op signature | PASS — moves move walks only |
+| 3. fidelity | the identity artifact replays a full episode with zero invalid/crash/timeout | PASS — vs `random`, $149k / $188k clean |
+| 4. budget | wall-clock per candidate is printed | 30 seeds × 6 panel = 180 episodes ≈ 35 min on 12 workers at ~2.4 s/ep |
+
+**What was measured building it, beyond the gates.** The one operator with a definable
+inverse is the movement shift, and it is the honest proof that the loop runs: mutating
+the seed's final-step movement (step 713, the tail of the route) and re-evaluating
+through the real baked artifact on the full v0.2.7 panel returned **bit-identical cash on
+all six opponents** — e.g. seed $142,582 vs `b8b9267d1c` $115,984; mutant identical,
+to the dollar, on every member. The no-op is a no-op empirically, not just by
+construction.
+
+**Design choices that were taken deliberately, and why:**
+
+- **Seed loading prefers `main.py._ROUTE`, hash-verified against the pool.** The baked
+  file is what ships; the pool is the identity the rest of the pipeline agrees on.
+  A drift between them is detected and the pool wins, loudly, because a silent drift
+  here poisons every mutation downstream.
+- **Evaluation reuses `simulate_candidates.run_stage` verbatim and shares its resume
+  key.** A mutated route is a new hash, so the loop never re-uses results across routes;
+  it only ever re-reads an anchor episode it already paid for. The harness cannot
+  drift from Phase 2 because it *is* Phase 2.
+- **`swap_herd` (#27) and `assign_idle` (#28) mutate but do not repair.** The cadence
+  compression and the choreography are the dependent issues' operators, not this
+  harness's; a wrong repair reads as "the herd starves for no reason" and would burn an
+  evaluation budget chasing a bug. `repath` (#29) and `move_sell_and_buy` (#30) are
+  `None` placeholders until their shortest-path and joint operators land.
+- **Acceptance is `rank_cvar`'s metric** — mean panel win rate, worst-opponent
+  tiebreak — unchanged, so a route this loop accepts is one the existing Phase 3 gate
+  would rank the same way. The carried-forward warning stands: local accept is a veto,
+  never a forecast.
+
+**Budget for the dependent issues.** At 180 episodes per accepted/rejected candidate,
+one mutation step is ~35 min on 12 workers; a 20-step greedy path is ~12 h. That is the
+number #27's herd sweep, #28's idle-turn rotation and #29's path optimisation scope
+against — and the reason each of those issues should batch its mutations rather than
+accept on single steps.
+
+**Live validation: none by design.** The harness ships no agent; its cost was eight
+unittest runs (8 tests, all green) plus one live 6-episode smoke pass against the real
+panel.
