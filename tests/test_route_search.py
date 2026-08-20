@@ -120,6 +120,15 @@ class TestOperators(unittest.TestCase):
                     wool_sells += 1
         self.assertGreater(wool_sells, 0)
 
+    def test_assign_idle_converts_pass_to_water(self) -> None:
+        out = rs.op_assign_idle(copy.deepcopy(self.seed), self.rng)
+        self.assertIsNotNone(out)
+        assert out is not None
+        mutated, note = out
+        self.assertIn("assigned PASS->WATER", note)
+        # Hash must differ from seed
+        self.assertNotEqual(rs._hash_of(mutated), rs._hash_of(self.seed))
+
 
 class TestAcceptRule(unittest.TestCase):
     def test_accept_matches_panel_sort_key(self) -> None:

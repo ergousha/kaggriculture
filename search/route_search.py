@@ -281,21 +281,66 @@ def op_retarget_plant(route: list[dict], rng, **_kw) -> tuple[list[dict], str] |
     target = _units(new[step])[slot]
     _write_unit(new[step], slot, ["PLANT", new_crop] + target[2:])
     # Rewrite exactly one BUY_SEED for the old crop, so the buy/plant accounting
-    # stays balanced. We take the first unmatched one.
+    # stays balanced. For orders with quantity > 1, decrement quantity and add/increment new_crop.
+    buy_rewritten = False
     for action in new:
-        for order in action.get("market") or []:
+        mkt = action.get("market") or []
+        for order in mkt:
             if (
                 isinstance(order, list)
                 and len(order) >= 3
                 and order[0] == "BUY_SEED"
                 and order[1] == current
             ):
-                order[1] = new_crop
-                return (
-                    new,
-                    f"retargeted PLANT {current}->{new_crop} @step {step} (BUY_SEED follows)",
-                )
-    return None
+                qty = int(order[2])
+                if qty <= 1:
+                    order[1] = new_crop
+                else:
+                    order[2] = qty - 1
+                    # Find or add BUY_SEED for new_crop in same market action
+                    existing_new = next(
+                        (
+                            o
+                            for o in mkt
+                            if isinstance(o, list)
+                            and len(o) >= 3
+                            and o[0] == "BUY_SEED"
+                            and o[1] == new_crop
+                        ),
+                        None,
+                    )
+                    if existing_new:
+                        existing_new[2] = int(existing_new[2]) + 1
+                    elif len(mkt) < 10:
+                        mkt.append(["BUY_SEED", new_crop, 1])
+                buy_rewritten = True
+                break
+        if buy_rewritten:
+            break
+
+    if not buy_rewritten:
+        return None
+
+    # Ensure market stream sells new_crop
+    for action in new:
+        mkt = action.get("market") or []
+        has_new_sell = any(
+            isinstance(o, list) and len(o) >= 2 and o[0] == "SELL" and o[1] == new_crop for o in mkt
+        )
+        has_other_sell = any(
+            isinstance(o, list)
+            and len(o) >= 2
+            and o[0] == "SELL"
+            and o[1] in ("STRAWBERRY", "MILK", "WOOL")
+            for o in mkt
+        )
+        if has_other_sell and not has_new_sell and len(mkt) < 10:
+            mkt.append(["SELL", new_crop, 10])
+
+    return (
+        new,
+        f"retargeted PLANT {current}->{new_crop} @step {step} (BUY_SEED & SELL follow)",
+    )
 
 
 def _herd_counts(route: list[dict]) -> tuple[int, int]:
@@ -426,18 +471,10 @@ def op_swap_herd(
 def op_assign_idle(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | None:
     """Give a PASS unit-turn a productive task (#28).
 
-    The conservative reading: only fills a PASS whose unit is already standing
-    somewhere a FERTILIZE is legal (the route COLLECT_FERTILIZERs, so fertilizer
-    exists) — and FERTILIZE is the op with the best measured margin in the repo
-    (+$400 of strawberry per 2 fertilizer that would have sold for ~$140). It
-    does not touch movement, so it cannot strand a unit.
+    Fills a PASS whose unit is already standing on or adjacent to farmed ground.
+    Prioritizes WATER (which requires 0 inventory slots and directly adds crop yield)
+    or FERTILIZE. It does not touch movement, so it cannot strand a unit.
     """
-    # Gate to the safe form, matching #28's work item: the PASS must sit on or
-    # next to a tile the route *already* farms (so the unit does not have to
-    # travel to reach it — travel would re-introduce the logistics-starvation
-    # the mechanism note warns about). That set is the units whose adjacent
-    # steps contain a tile op, which is the cheapest sound proxy for "standing
-    # on farmed ground" without simulating positions.
     idles = []
     for step, action in enumerate(route):
         for slot, unit in enumerate(_units(action)):
@@ -463,10 +500,10 @@ def op_assign_idle(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | No
         return None
     step, slot = idles[rng.randrange(len(idles))]
     new = copy.deepcopy(route)
-    _write_unit(new[step], slot, ["FERTILIZE"])
+    _write_unit(new[step], slot, ["WATER"])
     return (
         new,
-        f"assigned PASS->FERTILIZE @step {step} slot {slot} (unit already adjacent to farmed ground)",
+        f"assigned PASS->WATER @step {step} slot {slot} (unit already adjacent to farmed ground)",
     )
 
 
