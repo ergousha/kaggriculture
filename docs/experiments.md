@@ -1115,3 +1115,49 @@ As predicted in #27:
 
 `9c / 5s` candidate (hash `9d890c9a321f2c0b5bf7ca77fc9ac930`) passed all milestone gates and is baked into `main.py` as **v0.3.0**.
 
+---
+
+## [v0.3.1] Spend idle unit-turns on carrot/tomato & tile optimization (Issue #28)
+
+**The premise.** The incumbent route contains 667 `PASS` unit-turns across 719 steps. Issue #28 proposed converting these idle turns into short-cycle cash crops (CARROT: 2-day maturity, $20 seed $\to$ 4 units @ $35 = $140 revenue; TOMATO: $60 base, 8-day maturity) to capture uncontested town shop drain (~18 carrots/day = $630/day, 12 tomatoes/day = $720/day).
+
+### Idle Turn & Farm Tile Census
+
+We analyzed the 667 `PASS` turns and 100 farm tiles across the 719-step route:
+1. **70 turns** sit directly on planted crops (`MELON`, `STRAWBERRY`, `WHEAT`) that were unwatered on that day (`watered_today: False`).
+2. **66 turns** sit on empty farm tiles (`(2,4)`, `(8,1)`, `(9,1)`, `(7,4)`, `(1,1)`, `(4,1)`).
+3. **27 turns** sit on `WEED` tiles.
+4. **Tile Mapping**: Every single visited tile on the 10×10 farm is already allocated to high-margin STRAWBERRY/MELON crops, WHEAT feed crops, or 14 COW/SHEEP pasture tiles.
+
+### Candidate Sweep Across 6-Opponent Panel (30 Seeds, 1,440 Episodes)
+
+We evaluated 8 candidate variants sweeping carrot retargeting, tomato retargeting, and idle-turn water conversions:
+
+| Candidate | Description | Mean Win Rate | Mean Cash | Margin CVaR5 | Hash | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| **v0_3_0_incumbent** | Baseline 9c/5s route | 90.0% | $91,869 | −$5,243 | `8c62ea6056` | **Incumbent** |
+| **carrot_3** | 3 late wheat $\to$ carrot | 6.7% | $70,537 | −$64,119 | `b88826635f` | Crashed (feed starvation) |
+| **carrot_6** | 6 late wheat $\to$ carrot | 1.1% | $55,733 | −$112,936 | `e4e3dd4446` | Crashed (feed starvation) |
+| **carrot_10** | 10 late wheat $\to$ carrot | 0.0% | $50,696 | −$162,183 | `29585b7591` | Crashed (feed starvation) |
+| **carrot_15** | 15 late wheat $\to$ carrot | 0.0% | $45,678 | −$126,860 | `dd87319c08` | Crashed (feed starvation) |
+| **tomato_4** | 4 wheat $\to$ tomato | 42.8% | $87,354 | −$44,382 | `a714af8eb2` | Crashed (feed starvation) |
+| **water_straw_only** | 43 strawberry PASS $\to$ WATER | **90.6%** | $91,871 | −$5,243 | `dcd4e8c8b9` | Win rate +0.6% |
+| **water_straw_melon** | 54 strawberry/melon PASS $\to$ WATER | **90.6%** | $91,871 | −$5,243 | `e8c035f9d0` | Win rate +0.6% |
+| **water_all_crops** | 70 all-crop PASS $\to$ WATER | 86.1% | $91,996 | −$6,389 | `1925f90c23` | Degradation vs ebfc911eaa |
+
+### Critical Findings & Root Mechanisms
+
+1. **Wheat is the Livestock Engine's Non-Negotiable Input**:
+   - In the incumbent route, WHEAT is not grown for cash sale — it is harvested into the shed and fed to the 9 cows and 5 sheep.
+   - Retargeting even 3-6 wheat plantings to carrot or tomato starves the herd of wheat feed, causing cows/sheep to stop producing milk and wool. Livestock revenue collapses by $20k-$50k, crashing win rate from 90% to 0-6%.
+2. **Additive Dwell Planting Causes Inventory Deadlock**:
+   - The empty tiles where units dwell (`(2,4)`, `(8,1)`, etc.) are pastures where cows are placed on Day 3 or transit paths for fertilizer/wool delivery.
+   - Planting crops on dwell tiles results in carrying units holding harvested crops, which blocks hands from carrying fertilizer or milking cows on subsequent steps.
+3. **In-Place Watering Optimization**:
+   - Converting unwatered PASS turns on standing cash crops (`STRAWBERRY` and `MELON`) is 100% legal, consumes 0 inventory slots, and lifts single-agent win rate against the 6-opponent panel to **90.6%** (with a perfect 10/10 reference ladder sweep).
+4. **Search Harness Improvements**:
+   - **`op_retarget_plant`**: Fixed multi-quantity buy order splitting (e.g. `['BUY_SEED', 'WHEAT', 7]` $\to$ decrement quantity and add `['BUY_SEED', new_crop, 1]`) and automated downstream `SELL` order integration.
+   - **`op_assign_idle`**: Updated operator to prioritize `WATER` on standing crop tiles for safe yield optimization without inventory conflicts.
+   - **Unit Tests**: Added regression tests in `tests/test_route_search.py` verifying `op_assign_idle` and `op_retarget_plant`.
+
+
