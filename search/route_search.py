@@ -77,7 +77,7 @@ import simulate_candidates as phase2  # noqa: E402
 from mining import common  # noqa: E402
 from mining.common import PROJECT_ROOT, decode_route_b85  # noqa: E402
 
-SEED_CANDIDATE_PREFIX = "8c62ea6056"  # v0.3.0 incumbent (issue #27)
+SEED_CANDIDATE_PREFIX = "e8c035f9d0"  # v0.3.1 incumbent (issue #28)
 RESULTS_PATH = os.path.join(PROJECT_ROOT, "logs", "route_search_results.jsonl")
 AGENT_CACHE = os.path.join(PROJECT_ROOT, "logs", "_route_search_agents")
 

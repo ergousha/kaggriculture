@@ -21,7 +21,7 @@ and `search/` still operates on it; everything below about planners and schedule
 describes that line, not the current submission.
 
 ```
-main.py                       # THE submission — v0.3.0 route replay (9c/5s herd remix), stdlib only
+main.py                       # THE submission — v0.3.1 route replay (idle water optimization), stdlib only
 scripts/build_route_agent.py   # bakes a downloaded episode into a route-replay agent
 local_arena.py                # match runner, metrics, decision logs, A/B + sweep rig
 submit.py                     # pre-flight, submit, poll, history

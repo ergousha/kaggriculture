@@ -1155,9 +1155,9 @@ We evaluated 8 candidate variants sweeping carrot retargeting, tomato retargetin
    - Planting crops on dwell tiles results in carrying units holding harvested crops, which blocks hands from carrying fertilizer or milking cows on subsequent steps.
 3. **In-Place Watering Optimization**:
    - Converting unwatered PASS turns on standing cash crops (`STRAWBERRY` and `MELON`) is 100% legal, consumes 0 inventory slots, and lifts single-agent win rate against the 6-opponent panel to **90.6%** (with a perfect 10/10 reference ladder sweep).
-4. **Search Harness Improvements**:
-   - **`op_retarget_plant`**: Fixed multi-quantity buy order splitting (e.g. `['BUY_SEED', 'WHEAT', 7]` $\to$ decrement quantity and add `['BUY_SEED', new_crop, 1]`) and automated downstream `SELL` order integration.
-   - **`op_assign_idle`**: Updated operator to prioritize `WATER` on standing crop tiles for safe yield optimization without inventory conflicts.
-   - **Unit Tests**: Added regression tests in `tests/test_route_search.py` verifying `op_assign_idle` and `op_retarget_plant`.
+### Verdict
+
+`water_straw_melon` (54 strawberry & melon unwatered PASS $\to$ WATER turns converted, hash `e8c035f9d0ce7cd865e4078e013256db`) delivers **90.6% panel win rate** and a **10/10 reference ladder sweep** (+$22.4k margin vs tier 9 `closer_cleo`). Baked into `main.py` and `opponents/v0_3_1.py` as **v0.3.1**.
+
 
 
