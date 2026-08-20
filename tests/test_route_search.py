@@ -92,6 +92,29 @@ class TestOperators(unittest.TestCase):
             self.assertLessEqual(short, d_seed.get(crop, 0) + 1, crop)
         self.assertEqual(sum(d_seed.values()), sum(d_mut.values()))
 
+    def test_swap_herd_operator_converts_cows_and_integrates_wool(self) -> None:
+        cows_before, sheep_before = rs._herd_counts(self.seed)
+        self.assertEqual(cows_before, 10)
+        self.assertEqual(sheep_before, 4)
+
+        out = rs.op_swap_herd(copy.deepcopy(self.seed), self.rng)
+        self.assertIsNotNone(out)
+        assert out is not None
+        mutated, note = out
+        cows_after, sheep_after = rs._herd_counts(mutated)
+        self.assertEqual(cows_after, 9)
+        self.assertEqual(sheep_after, 5)
+        self.assertIn("converted COW #", note)
+        self.assertIn("wool sells integrated", note)
+
+        # Wool sells must now be present
+        wool_sells = 0
+        for action in mutated:
+            for order in action.get("market") or []:
+                if isinstance(order, list) and len(order) >= 3 and order[0] == "SELL" and order[1] == "WOOL":
+                    wool_sells += 1
+        self.assertGreater(wool_sells, 0)
+
 
 class TestAcceptRule(unittest.TestCase):
     def test_accept_matches_panel_sort_key(self) -> None:
