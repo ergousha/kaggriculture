@@ -1076,7 +1076,7 @@ The six operators, each `--no-<name>` away from off, matching the issue's list:
 | `retarget_plant` | retarget a `PLANT` to another crop (#28) | half — rewrites the matching `BUY_SEED` so buy/plant stay consistent |
 | `swap_herd` | convert a `BUY_ANIMAL COW` to `SHEEP` (#27) | no — cadence repair (interval 3→2) is #27's operator, deliberately not approximated here |
 | `assign_idle` | give a PASS turn a productive task (#28) | half — gated to units already adjacent to farmed ground, so no unit travels |
-| `repath` | re-path a movement run between fixed endpoints (#29) | placeholder — returns `None` until #29's shortest-path operator lands |
+| `repath` | re-path a movement run to the Manhattan-shortest walk between its fixed endpoints (#29) | **yes, and it proves it** — `search/board_paths.py` re-simulates positions and refuses to emit a route where any op moved off its step or its tile |
 | `move_sell_and_buy` | move a `SELL` and the `BUY` it funds together (#30) | placeholder — returns `None` until #30's joint operator lands |
 
 Measured budget on 12 workers: one candidate evaluation is **30 seeds × 6 panel = 180
@@ -1095,13 +1095,55 @@ The gates (`--self-test`, also pinned in `tests/test_route_search.py`):
    place), so moving a walk cannot disturb the schedule it walks between.
 3. **The identity artifact replays clean** through `local_arena` — zero invalid, zero
    crashes, zero timeouts (skipped loudly if `kaggle_environments` is absent).
-4. **The budget is printed**, so the dependent issues can be scoped.
+4. **#29's re-path is a verified no-op.** It walks strictly less and idles strictly more,
+   and every non-movement op still fires on its original step from its original tile.
+5. **The budget is printed**, so the dependent issues can be scoped.
 
 **Live validation: none.** This ships no agent. The carried-forward warning applies to
 everything it will ever emit: **local results have not historically predicted the ladder**
 — four consecutive selection passes won their local gates and moved the live score by
 nothing. Every accept from this loop is a veto, not a forecast; hold out fresh seeds
 (the v0.2.5 run measured a $3,640 winner's-curse shrinkage against a $1,610 margin).
+
+### Half the route is walking, and 88% of that walking is load-bearing (issue #29)
+
+```bash
+uv run python scripts/analyse_movement.py --verify              # census + slack report
+uv run python scripts/analyse_movement.py --drop-terminal --verify --emit out.py
+```
+
+`search/board_paths.py` re-plans the route's movement stream exactly. Movement in this env
+is unobstructed (a move applies iff the destination is on the board; `LOCKED` tiles do not
+block it and units do not collide) and positions reset every day, so the shortest walk
+between two tiles is any monotone staircase of length `manhattan(a, b)` — there is no graph
+search in this problem. A position simulator, pinned against a live episode in
+`tests/test_board_paths.py` for all 719 steps and all 13 unit slots, gives the endpoints;
+each stretch between two position-dependent ops is rewritten as that walk and the
+difference banked as `PASS`.
+
+**The finding is that there is almost nothing there.** Of 3,125 moves that have to get a
+unit somewhere, 3,073 are Manhattan-required — the recorded route is **98.3%
+path-optimal**, with 52 recoverable unit-turns across 23 of 1,787 segments, zero moves
+clamped at a board edge and zero issued to a unit that has not been hired. The real waste
+is elsewhere: 139 stretches have no op after them in their day, so the 359 moves in them
+buy a position that `_end_of_day` immediately discards. Banking both gives 409 turns —
+**11.7% of the walking, 5.8% of all labour**. The other 50% movement share is a property of
+the *task assignment*, not of slack in the pathing.
+
+Both re-paths clear the no-op gate at the strongest available standard: **all 360 paired
+episodes end with cash identical to the incumbent's, to the cent**, with movement strictly
+down (3,484 → 3,075) and `PASS` strictly up (699 → 1,108). Handing the recovered turns to
+#28's `PASS` → `WATER` consumer is a reject (62.2% vs 62.8% mean panel win) — `WATER` is
+once per tile per day, and the re-path lands its idle turns on tiles the route is already
+working. **No agent ships from this.** #29 says as much itself: on its own it produces an
+agent that walks less and does the same things.
+
+One thing worth carrying forward: **segments are not independent.** `_do_hire` spawns a
+hand on the least-occupied shed-access tile, so where a unit idles on the turn a hire
+resolves decides where the next hand starts its day. One segment in the incumbent
+(slot 6, steps 506–508) re-paths onto `(5,4)` and pushes hand 12's spawn from `(5,4)` to
+`(4,5)`, moving all nine of its ops that day one tile off. `repath` verifies every rewrite
+and discards that one. Full write-up in `docs/experiments.md`.
 
 ---
 

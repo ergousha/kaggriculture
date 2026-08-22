@@ -1161,3 +1161,187 @@ We evaluated 8 candidate variants sweeping carrot retargeting, tomato retargetin
 
 
 
+
+---
+
+## [#29] Offline path optimisation: half the route is walking, and 88% of that walking is load-bearing
+
+**The premise.** A unit-op census of the shipped v0.3.1 route (719 steps, 6,999 unit-turns):
+
+| op group | count | share |
+| --- | --- | --- |
+| movement (`WEST` 1,045 / `NORTH` 1,006 / `EAST` 809 / `SOUTH` 624) | **3,484** | **49.8%** |
+| productive tile ops (`WATER` + `HARVEST` + `PLANT` + `FERTILIZE`) | 1,646 | 23.5% |
+| `PASS` | 699 | 10.0% |
+| logistics (`FEED`, `CARE`, `COLLECT_FERTILIZER`, `PICKUP`, `PLACE`, `DROP`, `DIG`, `BUILD_PASTURE`) | 1,170 | 16.7% |
+
+Half of all labour is walking, at 2.12 moves per productive tile op. Issue #29's premise
+is that this is the one part of the game with an exact algorithm: the route is fixed and
+the board is deterministic, so between two consecutive position-dependent ops a unit's
+path is free — any walk that arrives by the turn the next op is scheduled is equivalent.
+
+Reproduce with `uv run python scripts/analyse_movement.py --verify`.
+
+### Method: an exact position simulator, not a heuristic
+
+`search/board_paths.py` replays the route's movement stream against the env's own position
+rules and returns every unit's tile at every step. Only three things move a unit and all
+three are in the route: a move op, the end-of-day reset, and a `HIRE` order's spawn. So
+this is a complete model, and `tests/test_board_paths.py` pins it against a live
+`kaggle_environments` episode — all 719 steps, all 13 unit slots, exact agreement.
+
+Each unit's day is then cut into **segments**: maximal runs of `MOVE`/`PASS` bracketed by
+*anchors* (any op whose effect depends on where the unit stands, i.e. everything that is
+not a move and not a `PASS`). A segment's endpoints are fixed; everything between them is
+re-planned and the difference banked as `PASS`, front-loaded so the unit arrives early and
+idles on the tile its next op needs.
+
+### Two of the three constraints the issue asked us to respect turn out to be vacuous
+
+The issue asks for a shortest path "respecting `unlocked_quadrants`, occupancy and the
+shed-access tiles". Reading `_apply_unit_action` in the env settles all three:
+
+* **`unlocked_quadrants` does not constrain movement.** A move is applied iff the
+  destination is on the board. The env's own comment: *"Movement onto LOCKED tiles is
+  allowed: a hand can spawn on a locked shed-access tile, and blocking movement would
+  strand it there forever."* Only *tile ops* check the lock.
+* **Occupancy does not constrain movement either.** There is no collision check anywhere;
+  any number of units may share a tile.
+* **Shed-access tiles matter, but not as obstacles** — see the coupling below.
+
+So the shortest path between two tiles is any monotone staircase of length
+`manhattan(a, b)`, and a BFS over the board would return the same number. There is no
+graph search in this problem, which is why the operator is exact rather than approximate.
+
+### Finding: the incumbent is already 98.3% Manhattan-optimal
+
+| | segments | moves | Manhattan-required | slack |
+| --- | --- | --- | --- | --- |
+| interior (an anchor follows in the same day) | 1,787 | 3,125 | 3,073 | **52** in 23 segments |
+| terminal (the day reset lands first) | 139 | 359 | — | **359, all of it** |
+| total | 1,926 | 3,484 | | 411 |
+
+409 of those 411 turns are actually banked; the missing 2 are the one segment the schedule
+verifier rejects, for the reason below.
+
+Two separate results hide inside the 50% movement share:
+
+1. **The pathing has almost no slack.** Of 3,125 moves that actually have to get a unit
+   somewhere, 3,073 are Manhattan-required. 23 segments out of 1,787 contain a detour, and
+   the whole recoverable total is 52 unit-turns — **1.7%** of interior walking. Zero moves
+   in the entire route are clamped at a board edge and zero are issued to a unit that has
+   not been hired yet; the recorded route's walking is essentially clean.
+2. **The dead labour is at the end of the day, not in the middle of a walk.** 139 segments
+   have no anchor after them: the unit walks somewhere and then `_end_of_day` teleports the
+   farmer back to spawn and dismisses every hand, discarding the position those 359 moves
+   bought. Nothing at end-of-day reads a unit's position (`_spawn_weeds` is per-tile and
+   unconditional, `_drop_inventories_to_shed` ignores where the unit is standing), so every
+   one of those moves is provably wasted.
+
+So #29's premise is half right. Half the labour *is* walking, but only **11.7%** of it is
+recoverable, and 87% of what is recoverable is end-of-day drift rather than bad pathing.
+The 50% movement share is a property of the **task assignment** — which tiles each unit is
+sent to, in which order — not of slack in the pathing. Cutting it further needs a different
+issue.
+
+### The coupling nobody expected: re-pathing one unit relocates another
+
+`_do_hire` spawns a hand on the **least-occupied shed-access tile** in NWSE order. Where a
+unit idles on the turn a hire resolves therefore decides where the *next* hand starts its
+day, and one segment in the incumbent trips exactly that:
+
+```
+slot 6, steps 506..508: (5,5) -> (5,4), 3 moves where 1 suffices
+  incumbent : slot 6 steps EAST off (5,5) at 506, so the two hires that turn
+              leave hand 12 spawning on (5,4)
+  re-pathed : slot 6 steps NORTH onto (5,4) at 506, so hand 12 spawns on (4,5)
+              instead -- and all nine of its ops that day fire one tile off
+```
+
+Segments are not independent, so `repath` verifies. The whole batch is applied and checked
+once (the ordinary case); on a violation the batch is rebuilt segment by segment and only
+the rewrites the schedule survives are kept. That discards exactly this one segment out of
+162 and is why the operator can honestly claim to be a no-op. A verifier that never fails
+is not a verifier — `tests/test_board_paths.py::TestVerifierHasTeeth` makes it fail on
+purpose three ways.
+
+### Gate
+
+**Step 1 — the no-op gate.** Both re-pathed routes were scored against the incumbent on
+the same grid (30 mid-stage seeds × 6 opponents = 180 episodes each, common random numbers
+on both axes, seat 0 fixed). The issue asks for equal win rate; paired **final cash** is
+the sharper form of the same claim and costs the same to measure:
+
+| route | hash | movement | `PASS` | mean panel win | worst opponent | episodes differing from the incumbent |
+| --- | --- | --- | --- | --- | --- | --- |
+| v0.3.1 incumbent | `e8c035f9d0` | 3,484 | 699 | 62.778% | 20.0% | — |
+| `repath_interior` | `497675fdd0` | 3,434 | 749 | 62.778% | 20.0% | **0 / 180** |
+| `repath_full` | `dbecd2d487` | 3,075 | 1,108 | 62.778% | 20.0% | **0 / 180** |
+| `repath_spent` | `d057e88b1f` | 3,075 | 692 | 62.222% | 23.3% | 180 / 180 |
+
+The gate passes at the strongest available standard: with the recovered turns banked as
+`PASS`, **every one of 360 episodes ends with cash identical to the incumbent's, to the
+cent** — not merely an equal win rate. Movement is strictly lower (3,484 → 3,075, −11.7%)
+and `PASS` strictly higher (699 → 1,108, +58.5%), so the census part of the gate passes too.
+
+*Panel note.* `candidates.jsonl` and `logs/_mined_agents/` are gitignored and absent from
+this checkout, so the v0.2.7 leaderboard-band panel that produced v0.3.1's 90.6% could not
+be rebuilt. This run substitutes the strongest reproducible panel on disk — `v0_2_6`,
+`v0_2_7`, `v0_3_0`, `v0_3_1`, `rancher_rita`, `melon_mateo` — which is harder (four of the
+six are our own successive versions), hence 62.8% rather than 90.6%. That does not weaken
+the gate: the claim being tested is *equality with the incumbent on an identical grid*, and
+bit-identical cash is panel-independent.
+
+**Step 2 — spending the recovered turns.** `repath_spent` hands all 416 recovered
+unit-turns to #28's only idle-turn consumer (`PASS` → `WATER`). It is a reject: mean panel
+win rate 62.222% against the incumbent's 62.778%, worst-opponent 23.3% vs 20.0% — a wash at
+best. The reason is structural and follows from where the recovered turns land. `WATER` is
+once per tile per day (`if tile["watered_today"]: return`), and the re-path deliberately
+front-loads its walk so a unit idles *on the tile its next op needs*, which is a tile the
+route is already working. 87% of the recovered turns come from terminal segments, where the
+unit stands where its last op of the day fired. So the turns are recovered in exactly the
+places that have nothing left to do — v0.3.1 already took the 54 unwatered-crop turns that
+did.
+
+**Ladder.** `scripts/rank_ladder.py --episodes 1 --require-perfect` over tiers 0–9
+(tiers 6–9 fetched from the reference dataset, measurement only):
+
+| agent | tiers won | tier 9 `closer_cleo` margin | cash on all ten rungs |
+| --- | --- | --- | --- |
+| `main.py` (v0.3.1) | **10/10** | +$22,453 | reference |
+| `repath_interior` | **10/10** | +$22,453 | **identical on every rung** |
+| `repath_full` | **10/10** | +$22,453 | **identical on every rung** |
+| `repath_spent` | **10/10** | +$22,208 | differs on all ten |
+
+The ladder is a third independent confirmation: banking the recovered turns as `PASS`
+reproduces the incumbent's cash rung by rung, to the dollar.
+
+### Verdict
+
+The re-path is correct, exact and measured. It is also **not worth a submission**, which
+#29 predicted of itself: *"On its own this produces an agent that walks less and does the
+same things."* The two ways to spend what it recovers both fail —
+
+* on `WATER`, because `WATER` is once per tile per day and the recovered turns land on tiles
+  the route already works;
+* on more production, because v0.3.1's sweep already established that the field is fully
+  allocated and that retargeting *any* wheat starves the herd's feed chain.
+
+So nothing ships. What ships instead is the tooling and the finding: `search/board_paths.py`
+(an env-exact position simulator, the segment decomposition, the shortest-path rewrite and
+the schedule verifier), `scripts/analyse_movement.py`, `search/route_search.op_repath`, and
+`tests/test_board_paths.py`. `main.py` stays on **v0.3.1**.
+
+Two results are worth carrying into #30 and anything after it:
+
+1. **The route's walking is not the inefficiency.** 98.3% of interior movement is
+   Manhattan-required. Any further reduction in the 50% movement share has to come from
+   changing *which unit does which task in which order*, which is a different problem — and
+   the README already records that reassigning tasks to minimise travel loses 31–38%,
+   because idle units clustering by the shed is load-bearing. #29 was right that this is a
+   different experiment from that one, and the re-path did not reproduce that loss; it
+   simply had almost nothing to find.
+2. **A route mutation can act at a distance.** Where a unit stands when a `HIRE` resolves
+   decides where the next hand spawns. Any future operator that changes a unit's position —
+   `shift_task_block` included — needs `board_paths.verify_schedule` or an equivalent, not
+   a local argument about the site it edited.
