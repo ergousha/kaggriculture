@@ -39,7 +39,9 @@ Mutation operators (each individually toggleable via `--no-<name>`):
   * `swap_herd`              convert a BUY_ANIMAL COW to SHEEP and repair the
                              downstream chore cadence (interval 3 -> 2),
   * `assign_idle`            give a PASS unit-turn a productive task (#28),
-  * `repath`                 re-path a movement run between two fixed endpoints,
+  * `repath`                 re-path a movement run to the Manhattan-shortest
+                             walk between its two fixed endpoints (#29; exact,
+                             and self-verifying -- see `search/board_paths.py`),
   * `move_sell_and_buy`      move a SELL and the BUY it funds together (#30).
 
 Honest scope. Route synthesis is *not* the no-op that route selection + runtime
@@ -61,6 +63,7 @@ import os
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,6 +79,7 @@ if _ROOT not in sys.path:
 import simulate_candidates as phase2  # noqa: E402
 from mining import common  # noqa: E402
 from mining.common import PROJECT_ROOT, decode_route_b85  # noqa: E402
+from search import board_paths  # noqa: E402
 
 SEED_CANDIDATE_PREFIX = "e8c035f9d0"  # v0.3.1 incumbent (issue #28)
 RESULTS_PATH = os.path.join(PROJECT_ROOT, "logs", "route_search_results.jsonl")
@@ -110,7 +114,9 @@ MINED_AGENT_DIR = os.path.join(PROJECT_ROOT, "logs", "_mined_agents")
 # Contiguous movement ops whose only effect on the board is "arrive one step
 # later"; shifting them cannot collide with anything because nothing depends on
 # a unit's *position* mid-run, only on the tile ops that bracket the run.
-MOVE_OPS = frozenset({"NORTH", "SOUTH", "EAST", "WEST"})
+# `board_paths` owns the set because it also owns the deltas, and a disagreement
+# between "what counts as a move" here and there would be silent.
+MOVE_OPS = board_paths.MOVE_OPS
 
 # Crops worth retargeting a PLANT to: the uncontested drain (#28) plus the two
 # products the field already produces. EGG is deliberately absent — it needs a
@@ -507,21 +513,90 @@ def op_assign_idle(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | No
     )
 
 
-def op_repath(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | None:
-    """Re-path a movement run between two fixed endpoints (#29)."""
-    # Placeholder for #29's shortest-path operator. The identity and round-trip
-    # gates do not need it; returning None keeps it out of the rotation without
-    # pretending it ran.
-    return None
+def op_repath(
+    route: list[dict],
+    rng: Any = None,
+    scope: str = "all",
+    drop_terminal: bool = False,
+    **_kw: Any,
+) -> tuple[list[dict], str] | None:
+    """Re-path movement runs between fixed endpoints (#29).
+
+    Between two consecutive position-dependent ops a unit's walk is free: any
+    route that arrives by the turn the next op is scheduled is equivalent, and
+    since this env applies a move iff the destination is on the board (`LOCKED`
+    tiles do not block, units do not collide), the shortest such walk is any
+    monotone staircase of length `manhattan(origin, destination)`. So the
+    operator is exact rather than heuristic, and `board_paths.verify_schedule`
+    proves it site by site before the route is ever scored: every non-movement op
+    still fires on its original step with its unit on its original tile.
+
+    `scope="all"` re-paths every wasteful segment at once — that is the mutation
+    #29's no-op gate is written against. `scope="one"` picks a single wasteful
+    segment, so the search loop can attribute an accept to one site.
+
+    `drop_terminal` additionally blanks segments with no anchor after them in
+    their day. Those moves are provably dead labour — the end-of-day reset
+    discards the position they buy, and nothing in `_end_of_day` reads a unit's
+    tile — and they are where 87% of the recoverable turns are. It is off by
+    default only because banking them stops the route reproducing the incumbent's
+    within-day final tile; that was gated separately and came back bit-identical
+    on 180 paired episodes, so turning it on is evidence-backed rather than a
+    guess (see `docs/experiments.md`).
+
+    Returns `None` when there is nothing to recover, which is the common case:
+    the incumbent's interior walking is already 98.3% Manhattan-optimal.
+    """
+    segs = board_paths.segments(route)
+    wasteful = [s for s in segs if s.slack > 0 or (drop_terminal and s.terminal and s.moves)]
+    if not wasteful:
+        return None
+    if scope == "one":
+        if rng is not None and hasattr(rng, "randrange"):
+            wasteful = [wasteful[rng.randrange(len(wasteful))]]
+        else:
+            wasteful = [wasteful[0]]
+    elif scope != "all":
+        raise ValueError(f"scope must be 'all' or 'one', got {scope!r}")
+
+    mutated, stats = board_paths.repath(route, only=wasteful, drop_terminal=drop_terminal)
+    if not stats["turns_recovered"]:
+        return None
+    violations = board_paths.verify_schedule(route, mutated)
+    if violations:
+        # A re-path that moves an op off its tile is a bug in this operator, not
+        # a candidate. Refuse to emit it rather than let the panel absorb it.
+        print(f"  !! repath rejected: {len(violations)} schedule violation(s): {violations[0]}")
+        return None
+    where = (
+        f"{stats['segments_rewritten']} segment(s)"
+        if scope == "all"
+        else f"slot {wasteful[0].slot} steps {wasteful[0].start}..{wasteful[0].end}"
+    )
+    return (
+        mutated,
+        f"re-pathed {where}: {stats['moves_before']}->{stats['moves_after']} moves, "
+        f"{stats['turns_recovered']} turn(s) banked as PASS"
+        + (
+            f" ({stats['terminal_segments_dropped']} terminal dropped)"
+            if stats["terminal_segments_dropped"]
+            else ""
+        ),
+    )
 
 
 def op_move_sell_and_buy(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | None:
     """Move a SELL and the BUY it funds together (#30's joint operator)."""
-    # Placeholder for #30's joint operator, for the same reason as `repath`.
+    # Placeholder for #30's joint operator. The identity and round-trip gates do
+    # not need it; returning None keeps it out of the rotation without pretending
+    # it ran.
     return None
 
 
-OPERATORS = {
+# Explicitly typed: the operators do not share one signature (`repath` takes a
+# scope and a terminal-segment flag), so without this the values infer to a
+# non-callable union and the dispatch in `run_search` stops type-checking.
+OPERATORS: dict[str, Callable[..., tuple[list[dict], str] | None]] = {
     "shift_task_block": op_shift_task_block,
     "retarget_plant": op_retarget_plant,
     "swap_herd": op_swap_herd,
@@ -740,16 +815,19 @@ def run_search(
 
 
 def self_test(candidates_path: str | None = None) -> int:
-    """The four gates, run cheaply and without a panel.
+    """The five gates, run cheaply and without a panel.
 
     1. Zero mutations -> emitted route is byte-identical to the seed.
     2. A mutation followed by its inverse round-trips to the same hash.
     3. The identity route replays through the artifact without invalid actions.
-    4. Wall-clock budget for a real pass is printed, so #27-#30 can be scoped.
+    4. #29's re-path is a verified no-op: it walks strictly less and idles
+       strictly more, and every non-movement op still fires on its original step
+       from its original tile.
+    5. Wall-clock budget for a real pass is printed, so #27-#30 can be scoped.
 
-    Gates 1-2 are pure and run in milliseconds. Gate 3 needs `kaggle_environments`
-    (one episode at DEFAULT_STEPS) and is skipped with a loud note if the package
-    is absent rather than silently passing.
+    Gates 1-2 and 4 are pure and run in seconds. Gate 3 needs
+    `kaggle_environments` (one episode at DEFAULT_STEPS) and is skipped with a
+    loud note if the package is absent rather than silently passing.
     """
     failures = 0
     seed = load_seed(candidates_path)
@@ -823,14 +901,42 @@ def self_test(candidates_path: str | None = None) -> int:
                 f"(me ${res['me_cash']:,.0f} vs random ${res['opp_cash']:,.0f})"
             )
 
-    # Gate 4: the budget, so dependent issues can be scoped.
+    # Gate 4: #29's re-path is a no-op. This is the one gate that checks a
+    # mutation *changes nothing observable*, which is what makes the recovered
+    # turns safe for #28 to spend later.
+    for label, drop_terminal in (("interior", False), ("full", True)):
+        mutated, stats = board_paths.repath(seed, drop_terminal=drop_terminal)
+        before, after = board_paths.census(seed), board_paths.census(mutated)
+        problems = board_paths.verify_schedule(seed, mutated)
+        if problems:
+            print(f"  FAIL gate 4 ({label}): {len(problems)} violation(s): {problems[0]}")
+            failures += 1
+        elif not stats["turns_recovered"]:
+            print(f"  gate 4 SKIP ({label}): the seed has no path slack to recover")
+        elif after["movement"] >= before["movement"] or after["idle"] <= before["idle"]:
+            print(
+                f"  FAIL gate 4 ({label}): movement {before['movement']}->{after['movement']}, "
+                f"idle {before['idle']}->{after['idle']} (want down, up)"
+            )
+            failures += 1
+        else:
+            print(
+                f"  gate 4 OK ({label}): {stats['turns_recovered']} turn(s) banked, movement "
+                f"{before['movement']}->{after['movement']}, idle {before['idle']}->{after['idle']}, "
+                f"every op still on its original step and tile"
+            )
+
+    # Gate 5: the budget, so dependent issues can be scoped.
     workers = max(1, (os.cpu_count() or 2) - 3)
     n_seeds = common.N_MID
     panel_n = len(DEFAULT_PANEL_LABELS)
     eps_per_eval = n_seeds * panel_n
-    sec_per_ep = 2.4  # measured: Phase 2 screen at 0.8 ep/s on 8 workers
+    # Measured on this panel: 720 episodes in 5.3 min on 13 workers (2.3 ep/s),
+    # i.e. ~5.7 s of one worker's time per episode. The older 2.4 s figure came
+    # from the Phase 2 screen, whose opponents are cheaper than a full panel.
+    sec_per_ep = 5.7
     print(
-        f"  gate 4 budget: one candidate = {n_seeds} seeds x {panel_n} opponents = "
+        f"  gate 5 budget: one candidate = {n_seeds} seeds x {panel_n} opponents = "
         f"{eps_per_eval} episodes; at ~{sec_per_ep}s/ep on {workers} workers that is "
         f"~{eps_per_eval * sec_per_ep / workers / 60:.0f} min per accepted/rejected candidate"
     )
