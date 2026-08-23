@@ -152,6 +152,134 @@ class TestAcceptRule(unittest.TestCase):
         self.assertIn("abc123", state.seen)
 
 
+class TestMoveSellAndBuy(unittest.TestCase):
+    """#30's joint operator: a SELL and the BUY it funds move together.
+
+    Every earlier attempt moved one leg -- #23 held sales back and the next HIRE
+    failed for cash, #25 pulled them forward and sold into a market that had not
+    risen. The operator is only interesting if the pair really does stay a pair,
+    so that is what these pin.
+    """
+
+    def test_both_legs_move_by_the_same_shift(self) -> None:
+        route: list[dict] = [
+            {"farmer": ["PASS"], "hands": [], "market": [["SELL", "MILK", 5]]},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": [["BUY_SEED", "WHEAT", 1]]},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+        ]
+        out = rs.op_move_sell_and_buy(route, None, shift=2, sell_site=(0, 0))
+        assert out is not None
+        mutated, note = out
+        self.assertEqual(mutated[0]["market"], [])
+        self.assertEqual(mutated[2]["market"], [["SELL", "MILK", 5]])
+        self.assertEqual(mutated[4]["market"], [["BUY_SEED", "WHEAT", 1]])
+        self.assertIn("shift +2", note)
+
+    def test_a_hire_is_never_delayed(self) -> None:
+        """A missing hand does not idle -- `_align_hands` truncates the hands
+        list, so every later slot in that turn's trace shifts by one."""
+        route: list[dict] = [
+            {"farmer": ["PASS"], "hands": [], "market": [["SELL", "MILK", 5], ["HIRE"]]},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+        ]
+        self.assertEqual(rs._funder_forward_slack(route, (0, 1)), 0)
+        self.assertIsNone(rs.op_move_sell_and_buy(route, None, shift=1, sell_site=(0, 0)))
+
+    def test_a_buy_never_outruns_the_unit_op_it_feeds(self) -> None:
+        route: list[dict] = [
+            {"farmer": ["PASS"], "hands": [], "market": [["SELL", "MILK", 5]]},
+            {"farmer": ["PASS"], "hands": [], "market": [["BUY_SEED", "MELON", 1]]},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PLANT", "MELON"], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+        ]
+        # The seed has to be in hand the turn *before* the PLANT: units act
+        # before the market does.
+        self.assertEqual(rs._funder_forward_slack(route, (1, 0)), 1)
+        out = rs.op_move_sell_and_buy(route, None, shift=3, sell_site=(0, 0))
+        assert out is not None
+        self.assertEqual(out[0][2]["market"], [["BUY_SEED", "MELON", 1]])
+        self.assertIn("shift +1", out[1])
+
+    def test_a_sale_never_outruns_the_stock_that_fills_it(self) -> None:
+        """A sale pulled back past the deposit that fills it earns nothing while
+        the purchase it funds still spends -- the mirror of #23's failure."""
+        route: list[dict] = [
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": []},
+            {"farmer": ["PLACE", "MILK", 5], "hands": [], "market": []},
+            {"farmer": ["PASS"], "hands": [], "market": [["SELL", "MILK", 5]]},
+            {"farmer": ["PASS"], "hands": [], "market": [["BUY_SEED", "WHEAT", 1]]},
+        ]
+        self.assertEqual(rs._sell_backward_slack(route, (3, 0)), 1)
+        out = rs.op_move_sell_and_buy(route, None, shift=-3, sell_site=(3, 0))
+        assert out is not None
+        self.assertEqual(out[0][2]["market"], [["SELL", "MILK", 5]])
+        self.assertIn("shift -1", out[1])
+
+    def test_the_shipped_routes_purchase_schedule_has_almost_no_forward_slack(self) -> None:
+        """The census #30 turns on: 319 of the route's 458 funded orders cannot
+        be delayed by a single step, so "move the BUY with the SELL" has very
+        little room to move it into."""
+        census = rs.funder_slack_census(_seed())
+        self.assertEqual(census["HIRE"]["zero"], census["HIRE"]["orders"])
+        self.assertEqual(census["BUY_LAND"]["zero"], census["BUY_LAND"]["orders"])
+        total = sum(v["orders"] for v in census.values())
+        pinned = sum(v["zero"] for v in census.values())
+        self.assertGreater(pinned / total, 0.65)
+
+    def test_the_sale_never_lands_after_the_purchase_it_funds(self) -> None:
+        seed = _seed()
+        rng = random.Random(7)
+        for _ in range(300):
+            out = rs.op_move_sell_and_buy(seed, rng)
+            if out is None:
+                continue
+            mutated, _note = out
+            self.assertEqual(len(mutated), len(seed))
+
+    def test_it_never_pushes_a_turn_past_the_market_order_cap(self) -> None:
+        """The interpreter truncates at `maxMarketOrdersPerTurn`, so a mutation
+        that overflows a turn would silently drop that turn's tail."""
+        seed = _seed()
+        rng = random.Random(11)
+        applied = 0
+        for _ in range(300):
+            out = rs.op_move_sell_and_buy(seed, rng)
+            if out is None:
+                continue
+            applied += 1
+            worst = max(len(step.get("market") or []) for step in out[0])
+            self.assertLessEqual(worst, rs.MAX_MARKET_ORDERS)
+        self.assertGreater(applied, 0, "operator never fired on the shipped route")
+
+    def test_it_refuses_rather_than_truncating_a_full_turn(self) -> None:
+        full = [["HIRE"]] * rs.MAX_MARKET_ORDERS
+        route: list[dict] = [
+            {"farmer": ["PASS"], "hands": [], "market": [["SELL", "MILK", 5], ["HIRE"]]},
+            {"farmer": ["PASS"], "hands": [], "market": list(full)},
+        ]
+        self.assertIsNone(rs.op_move_sell_and_buy(route, None, shift=1, sell_site=(0, 0)))
+
+    def test_it_conserves_every_order_in_the_route(self) -> None:
+        seed = _seed()
+        before = sorted(tuple(o) for step in seed for o in (step.get("market") or []))
+        rng = random.Random(3)
+        for _ in range(50):
+            out = rs.op_move_sell_and_buy(seed, rng)
+            if out is None:
+                continue
+            after = sorted(tuple(o) for step in out[0] for o in (step.get("market") or []))
+            self.assertEqual(before, after)
+
+    def test_it_sits_out_a_route_with_nothing_to_re_time(self) -> None:
+        route = [{"farmer": ["PASS"], "hands": [], "market": [["SELL", "WOOL", 5]]}]
+        self.assertIsNone(rs.op_move_sell_and_buy(route, random.Random(0)))
+
+
 class TestIdentityGate(unittest.TestCase):
     def test_zero_mutation_bakes_byte_identical_route(self) -> None:
         seed = _seed()

@@ -105,6 +105,14 @@ def run_job(job: dict) -> dict:
         "timeouts": res["timeouts"],
         "noop": res["actions_noop"],
         "actions": res["actions_total"],
+        # Carried so a panel run can answer #30's gate ("zero increase in shed
+        # overflow, zero failed HIRE/BUY relative to the incumbent") without
+        # paying for the grid a second time. Rows written before #30 lack them.
+        "shed_overflow_lost": res.get("shed_overflow_lost", 0),
+        "orders_failed_hire": res.get("orders_failed_hire", 0),
+        "orders_failed_land": res.get("orders_failed_land", 0),
+        "orders_failed_buy": res.get("orders_failed_buy", 0),
+        "orders_failed_sell": res.get("orders_failed_sell", 0),
         "harness_error": res["harness_error"],
     }
 
