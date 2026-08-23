@@ -42,7 +42,12 @@ Mutation operators (each individually toggleable via `--no-<name>`):
   * `repath`                 re-path a movement run to the Manhattan-shortest
                              walk between its two fixed endpoints (#29; exact,
                              and self-verifying -- see `search/board_paths.py`),
-  * `move_sell_and_buy`      move a SELL and the BUY it funds together (#30).
+  * `move_sell_and_buy`      move a SELL and the BUY it funds together (#30;
+                             clamped so the purchase never outruns the unit op
+                             it feeds and the sale never outruns the stock that
+                             fills it -- `scope="all"` moves every pair at once,
+                             because one pair out of 82 is below the grid's
+                             noise floor).
 
 Honest scope. Route synthesis is *not* the no-op that route selection + runtime
 layers is: several operators change what the agent does and can invalidate the
@@ -110,6 +115,22 @@ DEFAULT_PANEL_LABELS = (
     "8f7dd57d5f",
 )
 MINED_AGENT_DIR = os.path.join(PROJECT_ROOT, "logs", "_mined_agents")
+
+# The fallback panel, and the only one reproducible from a clean checkout:
+# `candidates.jsonl` and `logs/_mined_agents/` are gitignored, so the
+# leaderboard-band panel above cannot be rebuilt without a fresh mine. Four of
+# these six are our own successive versions, which makes it a *harder* panel than
+# the mined one and the absolute win rates correspondingly lower. That does not
+# weaken a comparison between two routes scored on it, which is all this harness
+# ever asks of a panel.
+LOCAL_PANEL = (
+    ("v0_2_6", "opponents/v0_2_6.py"),
+    ("v0_2_7", "opponents/v0_2_7.py"),
+    ("v0_3_0", "opponents/v0_3_0.py"),
+    ("v0_3_1", "opponents/v0_3_1.py"),
+    ("rita", "opponents/ladder/rancher_rita.py"),
+    ("mateo", "opponents/ladder/melon_mateo.py"),
+)
 
 # Contiguous movement ops whose only effect on the board is "arrive one step
 # later"; shifting them cannot collide with anything because nothing depends on
@@ -585,11 +606,325 @@ def op_repath(
     )
 
 
-def op_move_sell_and_buy(route: list[dict], rng, **_kw) -> tuple[list[dict], str] | None:
-    """Move a SELL and the BUY it funds together (#30's joint operator)."""
-    # Placeholder for #30's joint operator. The identity and round-trip gates do
-    # not need it; returning None keeps it out of the rotation without pretending
-    # it ran.
+MAX_MARKET_ORDERS = 10  # configuration.maxMarketOrdersPerTurn; the tail is dropped
+
+# Products whose realised price collapses far enough that re-timing a sale could
+# pay for itself: MILK clears 13% of its $160 base and STRAWBERRY 52% of its
+# $120 (measured by `scripts/analyse_market_fills.py`). WOOL clears 103% and
+# WHEAT 167%, so moving those is a bet against the only two products the route
+# already prices well.
+RETIMEABLE_SELLS = ("MILK", "STRAWBERRY")
+
+# Every order that takes money out of the farm. `_do_hire` and `_commit_unit`
+# both fail silently on insufficient funds, so these are the orders a deferred
+# sale can break, and therefore the ones that have to travel with it.
+FUNDED_OPS = ("HIRE", "BUY_LAND", "BUY_SEED", "BUY_ANIMAL", "BUY_PRODUCT")
+
+
+def _order_sites(route: list[dict]) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """(sell sites, funded sites) as (step, index-within-that-step's-market)."""
+    sells: list[tuple[int, int]] = []
+    funded: list[tuple[int, int]] = []
+    for step, action in enumerate(route):
+        for i, order in enumerate(action.get("market") or []):
+            if not isinstance(order, list) or not order:
+                continue
+            if order[0] == "SELL" and len(order) >= 2 and order[1] in RETIMEABLE_SELLS:
+                sells.append((step, i))
+            elif order[0] in FUNDED_OPS:
+                funded.append((step, i))
+    return sells, funded
+
+
+# What each funded order buys, and the unit op that consumes it. A purchase is
+# not a free variable either: the interpreter runs `_apply_unit_action` for every
+# unit *before* `_process_market`, so a BUY on step t is only usable from t + 1,
+# and a PLANT whose seed has not arrived is not merely skipped -- the interpreter
+# drops **every** PLANT of that crop that turn. Move a BUY past its consumer and
+# the route stops producing, which is what the first bulk measurement of this
+# operator did: STRAWBERRY 249 -> 16 units, MILK 254 -> 78, at *higher* $/unit.
+FUNDER_CONSUMERS = {
+    "BUY_SEED": ("PLANT",),
+    "BUY_ANIMAL": ("PICKUP",),
+    "BUY_PRODUCT": ("PICKUP",),
+}
+
+
+def _funder_forward_slack(route: list[dict], site: tuple[int, int]) -> int:
+    """How many steps this funded order may be delayed before something starves.
+
+    `HIRE` and `BUY_LAND` return 0 and are never delayed. A missing hand does not
+    just idle: `_align_hands` truncates the hands list to the live count, so every
+    later slot in that turn's trace shifts by one and the whole hand assignment
+    for the turn is wrong. A quadrant's tiles stay `LOCKED` until `BUY_LAND`
+    clears, and a tile op on a locked tile is a silent no-op.
+    """
+    step, idx = site
+    order = (route[step].get("market") or [])[idx]
+    op = order[0]
+    if op in ("HIRE", "BUY_LAND"):
+        return 0
+    item = order[1] if len(order) > 1 else None
+    consumers = FUNDER_CONSUMERS.get(op, ())
+    for t in range(step + 1, len(route)):
+        for unit in _units(route[t]):
+            if (
+                isinstance(unit, list)
+                and len(unit) > 1
+                and unit[0] in consumers
+                and unit[1] == item
+            ):
+                return max(0, t - 1 - step)
+    return len(route) - 1 - step
+
+
+# The shed is filled by an explicit PLACE/DROP, and at the day boundary by
+# `_drop_inventories_to_shed` emptying every unit's carried inventory into it.
+# Both happen before `_process_market` on their turn, so a sale may be pulled
+# back to a same-item deposit, or to the start of its day, but no further: the
+# mirror image of the forward constraint, and the reason the first backward bulk
+# move measured $19,113 against a $63,601 baseline with *higher* $/unit on every
+# product. The sale outran the production that fills it while the purchase it
+# funds still spent.
+DEPOSIT_OPS = ("PLACE", "DROP")
+TURNS_PER_DAY = 24
+
+
+def _sell_backward_slack(route: list[dict], site: tuple[int, int]) -> int:
+    """How many steps this SELL may be pulled earlier before the shed is behind."""
+    step, idx = site
+    order = (route[step].get("market") or [])[idx]
+    item = order[1] if len(order) > 1 else None
+    floor = (step // TURNS_PER_DAY) * TURNS_PER_DAY
+    for t in range(step - 1, floor - 1, -1):
+        for unit in _units(route[t]):
+            if (
+                isinstance(unit, list)
+                and len(unit) > 1
+                and unit[0] in DEPOSIT_OPS
+                and unit[1] == item
+            ):
+                return step - t
+    return step - floor
+
+
+def funder_slack_census(route: list[dict]) -> dict[str, Any]:
+    """The forward slack of every funded order, grouped by op. #30's headline."""
+    _sells, funded = _order_sites(route)
+    by_op: dict[str, list[int]] = {}
+    for site in funded:
+        order = (route[site[0]].get("market") or [])[site[1]]
+        by_op.setdefault(order[0], []).append(_funder_forward_slack(route, site))
+    out = {}
+    for op, slacks in sorted(by_op.items()):
+        out[op] = {
+            "orders": len(slacks),
+            "zero": sum(1 for s in slacks if s == 0),
+            "median": sorted(slacks)[len(slacks) // 2],
+            "max": max(slacks),
+        }
+    return out
+
+
+def _pair_sells_with_funders(
+    sells: list[tuple[int, int]], funded: list[tuple[int, int]]
+) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """Greedily match each SELL to the first money-spending order after it.
+
+    Greedy-by-position is the right matching here rather than an artefact of
+    convenience: the interpreter drains a turn's market queue in slot order and
+    spends the proceeds as it goes, so the order a sale actually funds *is* the
+    next one that costs money. A funder is claimed once, so two sales never both
+    claim the same `HIRE`.
+    """
+    pairs = []
+    claimed: set[tuple[int, int]] = set()
+    for site in sells:
+        funder = next((f for f in funded if f > site and f not in claimed), None)
+        if funder is None:
+            continue
+        claimed.add(funder)
+        pairs.append((site, funder))
+    return pairs
+
+
+def _apply_moves(route: list[dict], moves: dict[tuple[int, int], int]) -> list[dict] | None:
+    """Rebuild every market queue with `moves` applied, or `None` on overflow.
+
+    Orders keep their original relative order inside a destination turn, which is
+    what keeps a moved SELL ahead of the BUY it funds.
+    """
+    buckets: dict[int, list[tuple[tuple[int, int], list]]] = {}
+    for step, action in enumerate(route):
+        for idx, order in enumerate(action.get("market") or []):
+            dst = moves.get((step, idx), step)
+            buckets.setdefault(dst, []).append(((step, idx), list(order)))
+    for dst, entries in buckets.items():
+        if len(entries) > MAX_MARKET_ORDERS:
+            return None
+        if not 0 <= dst < len(route):
+            return None
+    new = copy.deepcopy(route)
+    for step in range(len(new)):
+        entries = sorted(buckets.get(step, []), key=lambda e: e[0])
+        new[step]["market"] = [order for _origin, order in entries]
+    return new
+
+
+def op_move_sell_and_buy(
+    route: list[dict],
+    rng: Any = None,
+    shift: int | None = None,
+    sell_site: tuple[int, int] | None = None,
+    scope: str = "one",
+    **_kw: Any,
+) -> tuple[list[dict], str] | None:
+    """Move a SELL and the BUY it funds together (#30's joint operator).
+
+    Every previous attempt in this repo moved one leg. #23 held sales back and
+    the next `HIRE` failed for cash; #25 pulled sales forward and sold into a
+    market that had not risen yet. Both are the same finding read from opposite
+    ends: **the route is a cash schedule**, and a sale's turn is not a free
+    variable because a purchase downstream is timed against its proceeds.
+
+    So this operator moves the pair. It picks a SELL of a product whose realised
+    price collapses, finds the first money-spending order at or after it -- the
+    `HIRE` or `BUY_*` that sale funds -- and slides both by the same `shift`,
+    which keeps the gap between revenue and spend exactly as the route recorded
+    it while moving *when* the pair happens. The search decides whether the sale
+    is worth more `shift` turns later than the purchase is worth sooner; nothing
+    here assumes it is.
+
+    Refuses rather than truncates. A destination already holding
+    `maxMarketOrdersPerTurn` orders would silently drop the tail of that turn --
+    which is the failure #23's write-up warns about -- so the mutation is
+    abandoned instead.
+    """
+    sells, funded = _order_sites(route)
+    if not sells or not funded:
+        return None
+
+    if scope == "all":
+        return _move_every_pair(route, sells, funded, shift, rng)
+    if scope != "one":
+        raise ValueError(f"scope must be 'one' or 'all', got {scope!r}")
+
+    if sell_site is not None and sell_site in sells:
+        s_step, s_idx = sell_site
+    elif rng is not None and hasattr(rng, "randrange"):
+        s_step, s_idx = sells[rng.randrange(len(sells))]
+    else:
+        s_step, s_idx = sells[0]
+
+    # The BUY this sale funds: the first money-spending order at or after it.
+    # "At or after" rather than strictly after because a turn's market queue is
+    # processed in slot order, so a SELL in slot 0 does fund a HIRE in slot 1.
+    pair = next(
+        ((b_step, b_idx) for b_step, b_idx in funded if (b_step, b_idx) > (s_step, s_idx)),
+        None,
+    )
+    if pair is None:
+        return None
+    b_step, b_idx = pair
+
+    if shift is None:
+        if rng is not None and hasattr(rng, "randrange"):
+            shift = rng.choice([-12, -6, -3, -1, 1, 3, 6, 12])
+        else:
+            shift = 6
+    if shift == 0:
+        return None
+    if shift > 0:
+        shift = min(shift, _funder_forward_slack(route, (b_step, b_idx)))
+    else:
+        shift = -min(-shift, _sell_backward_slack(route, (s_step, s_idx)))
+    if shift == 0:
+        return None
+
+    s_dst, b_dst = s_step + shift, b_step + shift
+    if not (0 <= s_dst < len(route) and 0 <= b_dst < len(route)):
+        return None
+    if s_dst == s_step and b_dst == b_step:
+        return None
+    # The pair has to stay ordered: a sale that lands after the purchase it funds
+    # is the very failure this operator exists to avoid.
+    if s_dst > b_dst:
+        return None
+
+    new = copy.deepcopy(route)
+    sell_order = list((new[s_step].get("market") or [])[s_idx])
+    buy_order = list((new[b_step].get("market") or [])[b_idx])
+
+    # Remove high index first within a step so the second removal is not shifted.
+    for step, idx in sorted(((s_step, s_idx), (b_step, b_idx)), reverse=True):
+        del new[step]["market"][idx]
+
+    for step, order in ((s_dst, sell_order), (b_dst, buy_order)):
+        dst = new[step].setdefault("market", [])
+        if len(dst) >= MAX_MARKET_ORDERS:
+            return None
+        dst.append(order)
+
+    note = (
+        f"moved {sell_order[0]} {sell_order[1]} step {s_step}->{s_dst} with the "
+        f"{buy_order[0]} it funds, step {b_step}->{b_dst} (shift {shift:+d})"
+    )
+    return new, note
+
+
+def _move_every_pair(
+    route: list[dict],
+    sells: list[tuple[int, int]],
+    funded: list[tuple[int, int]],
+    shift: int | None,
+    rng: Any,
+) -> tuple[list[dict], str] | None:
+    """`scope="all"`: shift every (SELL, funder) pair by the same amount.
+
+    A single-site move of one sale out of 82 is below the noise floor of a
+    180-episode panel grid -- the standard error on a win rate there is about
+    3.7 points -- so measuring the *idea* needs a route-level change. This is
+    that: the whole metered sale stream and the purchases it funds slide
+    together, which is the same hypothesis at a size the grid can resolve.
+
+    Pairs whose destination would overflow a turn are dropped one at a time,
+    worst-offending turn first, rather than truncating it.
+    """
+    if shift is None:
+        shift = rng.choice([-12, -6, -3, 3, 6, 12]) if rng is not None else 6
+    if shift == 0:
+        return None
+    pairs = _pair_sells_with_funders(sells, funded)
+    if not pairs:
+        return None
+    pairs = [
+        (s, b)
+        for s, b in pairs
+        if 0 <= s[0] + shift < len(route)
+        and 0 <= b[0] + shift < len(route)
+        and s[0] + shift <= b[0] + shift
+        # A forward move may not outrun the unit op the purchase feeds; a
+        # backward one may not outrun the stock that fills the sale.
+        and (
+            shift <= _funder_forward_slack(route, b)
+            if shift > 0
+            else -shift <= _sell_backward_slack(route, s)
+        )
+    ]
+    moved: list[tuple[tuple[int, int], tuple[int, int]]] = list(pairs)
+    while moved:
+        moves = {}
+        for s, b in moved:
+            moves[s] = s[0] + shift
+            moves[b] = b[0] + shift
+        new = _apply_moves(route, moves)
+        if new is not None:
+            return (
+                new,
+                f"moved {len(moved)} (SELL, funder) pair(s) by {shift:+d} steps together "
+                f"({len(pairs) - len(moved)} dropped for the order cap)",
+            )
+        moved.pop()
     return None
 
 
@@ -809,6 +1144,55 @@ def run_search(
     }
 
 
+def sweep_joint(
+    shifts: list[int],
+    panel: list[tuple[str, str]],
+    seeds: list[int],
+    workers: int,
+    results_path: str,
+    seed_route: list[dict],
+) -> int:
+    """Score the incumbent against a bulk joint move at each shift (issue #30).
+
+    The single-site operator moves one sale out of 82; on a 180-episode grid the
+    standard error of a win rate is ~3.7 points, so that measures noise. The bulk
+    form -- every (SELL, funder) pair shifted by the same amount -- is the same
+    hypothesis at a size the grid can resolve, which is why this is what gets
+    measured before any hill-climb spends a day on single sites.
+    """
+    state = SearchState(results_path=results_path)
+    state.load()
+    rows = [("incumbent", 0, evaluate(seed_route, panel, seeds, workers, results_path, state))]
+    for shift in shifts:
+        out = op_move_sell_and_buy(seed_route, None, shift=shift, scope="all")
+        if out is None:
+            print(f"  shift {shift:+d}: operator refused (order cap or edge of route)")
+            continue
+        mutated, note = out
+        print(f"  shift {shift:+d}: {note}")
+        rows.append(
+            (
+                f"joint{shift:+d}",
+                shift,
+                evaluate(mutated, panel, seeds, workers, results_path, state),
+            )
+        )
+    print(
+        f"\n  {'route':<12} {'hash':<12} {'mean win':>9} {'worst':>7} {'mean cash':>11} {'margin':>10}"
+    )
+    for label, _shift, score in rows:
+        print(
+            f"  {label:<12} {str(score.get('hash', ''))[:10]:<12} "
+            f"{score.get('mean_win', 0):>8.1%} {score.get('worst_win', 0):>6.1%} "
+            f"{score.get('cash_mean', 0):>11,.0f} {score.get('mean_margin', 0):>10,.0f}"
+        )
+    print(
+        "\n  REMINDER: a local accept is a veto, not a forecast. "
+        "Hold out fresh seeds for anything this sweep selects."
+    )
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Gates (issue #26: "this is a harness, so the gate is that it changes nothing")
 # ---------------------------------------------------------------------------
@@ -970,6 +1354,16 @@ def _nonmove_signature(route: list[dict]) -> set:
 # ---------------------------------------------------------------------------
 
 
+def _build_local_panel() -> list[tuple[str, str]]:
+    panel = []
+    for label, rel in LOCAL_PANEL:
+        path = os.path.join(PROJECT_ROOT, rel)
+        if not os.path.exists(path):
+            raise SystemExit(f"local panel member missing at {path}")
+        panel.append((label, path))
+    return panel
+
+
 def _build_panel(args) -> list[tuple[str, str]]:
     """Resolve the default panel's 10-char labels to on-disk agent paths.
 
@@ -1034,6 +1428,20 @@ def main(argv=None) -> int:
     ap.add_argument("--seeds", type=int, default=common.N_MID, help="seeds per evaluation")
     ap.add_argument("--results", default=RESULTS_PATH)
     ap.add_argument("--rng-seed", type=int, default=0)
+    ap.add_argument(
+        "--sweep-joint",
+        default=None,
+        metavar="SHIFTS",
+        help="comma-separated step shifts; score the seed plus one bulk "
+        "move_sell_and_buy(scope='all') route per shift and stop (issue #30)",
+    )
+    ap.add_argument(
+        "--panel",
+        default="mined",
+        choices=("mined", "local"),
+        help="'mined' is the leaderboard-band panel (needs candidates.jsonl); "
+        "'local' is the reproducible opponents/ roster",
+    )
     for name in ALL_OPERATORS:
         ap.add_argument(
             f"--no-{name.replace('_', '-')}", dest=name, action="store_false", default=True
@@ -1043,14 +1451,30 @@ def main(argv=None) -> int:
     if args.self_test:
         return self_test(args.candidates)
 
+    if args.panel == "local":
+        panel = _build_local_panel()
+    elif args.panel != "mined":
+        raise SystemExit(f"unknown panel {args.panel!r} (want 'mined' or 'local')")
+
     operators = tuple(n for n in ALL_OPERATORS if getattr(args, n))
     if not operators:
         raise SystemExit("no operators enabled")
-    panel = _build_panel(args)
+    if args.panel == "mined":
+        panel = _build_panel(args)
     seeds = common.seed_set(args.seeds, common.SEED_BASE)
     seed_route = load_seed(args.candidates)
     print(f"  seed {SEED_CANDIDATE_PREFIX} ({len(seed_route)} steps), operators {operators}")
     print(f"  panel {[lab for lab, _ in panel]}, {len(seeds)} seeds, {args.workers} workers")
+
+    if args.sweep_joint is not None:
+        return sweep_joint(
+            [int(s) for s in args.sweep_joint.split(",") if s.strip()],
+            panel,
+            seeds,
+            args.workers,
+            args.results,
+            seed_route,
+        )
     out = run_search(
         args.iterations,
         operators,

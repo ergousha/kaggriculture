@@ -14,7 +14,10 @@ runtime layers and nothing else -- no planner, no scheduler, no opponent model:
     the market is still shallow and, against the 10-order-per-turn cap, the
     valuable sale is the one that survives. Nothing about production changes;
   * hands alignment: the hands list is padded or truncated to the live hand count,
-    because a route recorded with N hands is otherwise invalid on a turn with M.
+    because a route recorded with N hands is otherwise invalid on a turn with M;
+  * sell metering: SELL quantities for the metered products are held back to what
+    still clears a price floor, but only while the farm already holds every dollar
+    the rest of the route has to spend. Off unless `_METER_ITEMS` is non-empty.
 
 Route provenance:
   episode: 93065370
@@ -164,6 +167,7 @@ _ROUTE = json.loads(zlib.decompress(base64.b85decode("".join(_ROUTE_B85_PARTS)))
 
 _PRICE_FLOOR = 1.0
 _MARKET_I0 = 10000
+_MAX_MARKET_ORDERS = 10
 _MARKET_PARAMS = {
     "WHEAT": (25, 400, "sqrt", 0.80, "log", 0.20),
     "CARROT": (35, 450, "log", 0.20, "sqrt", 0.70),
@@ -369,11 +373,226 @@ def _rank_sells(obs, action):
     return action
 
 
+# ---------------------------------------------------------------------------
+# Sell metering inside the route's own cash envelope (issue #30).
+#
+# The route is a cash schedule, not a production plan with a market layer on top.
+# Every HIRE and BUY is timed against money it expects to already have, and
+# `_do_hire` returns without a word when it cannot afford the hire, so a withheld
+# sale does not cost a price -- it costs a hand, and then the throughput that hand
+# was going to produce. Flat price floors were measured on exactly this route and
+# they are catastrophic: $26,322 / $23,345 / $1,090 at floors 0.60 / 0.85 / 1.00
+# against a $104,027 baseline (docs/experiments.md, issue #23).
+#
+# What makes deferral safe is that the route is known in advance, so the cash it
+# still has to find is computable rather than guessable. `_CASH_FIXED[t]` is the
+# exact cost of every HIRE / BUY_SEED / BUY_ANIMAL / BUY_LAND at steps >= t --
+# HIRE is `fib(hires so far today)` and the counter resets at the day boundary,
+# BUY_LAND walks a fixed ladder, seeds and animals are catalogue prices --  and
+# `_CASH_UNITS[t]` counts the BUY_PRODUCT units still to come, which are priced
+# from the live market because their cost is not knowable offline. Money only
+# ever leaves the farm through those orders, so
+#
+#     money(u) >= money(t) - spent(t..u) >= need(t) - spent(t..u) = need(u)
+#
+# for every u >= t: hold `need(t)` and no future order in the route can fail.
+# Metering runs only while that inequality holds, which is the whole difference
+# between this layer and the three attempts that came before it.
+# ---------------------------------------------------------------------------
+
+_SEED_COST = {"WHEAT": 10, "CARROT": 20, "TOMATO": 50, "STRAWBERRY": 100, "MELON": 80}
+_ANIMAL_COST = {"GOOSE": 300, "COW": 400, "SHEEP": 500}
+_LAND_PRICES = (1000, 2000, 4000)
+_TURNS_PER_DAY = 24
+
+# Metering knobs. `_METER_ITEMS = ()` disables the layer outright and is the OFF
+# arm of every A/B in docs/experiments.md -- the same file, one tuple emptied.
+_METER_ITEMS = ()
+_METER_FLOOR = 0.55  # sell while the unit still clears this fraction of base
+_METER_MAX_HOLD = 24  # shed slots we are ever willing to tie up
+_METER_SHED_RELEASE = 78  # observed shed occupancy that ends all withholding
+_METER_FLUSH_STEP = 672  # last two days: a held unit at the horn scores $0
+_METER_BUY_MARGIN = 1.25  # safety multiple on the unpriced BUY_PRODUCT tail
+
+_METER_STATE: dict = {0: {}, 1: {}}
+
+
+def _fib(n):
+    """`_fib(0) = 1, _fib(1) = 1, _fib(2) = 2, ...`, the interpreter's indexing."""
+    a, b = 1, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+def _cash_requirement(route):
+    """(fixed, units) cumulative over steps >= t. See search/cash_schedule.py."""
+    n = len(route)
+    per_fixed = [0.0] * n
+    per_units = [0] * n
+    hires_today = 0
+    day = -1
+    lands = 0
+    for t, action in enumerate(route):
+        if t // _TURNS_PER_DAY != day:
+            day = t // _TURNS_PER_DAY
+            hires_today = 0
+        for order in action.get("market") or []:
+            if not isinstance(order, list) or not order:
+                continue
+            op = order[0]
+            if op == "HIRE":
+                per_fixed[t] += _fib(hires_today)
+                hires_today += 1
+            elif op == "BUY_LAND":
+                if lands < len(_LAND_PRICES):
+                    per_fixed[t] += _LAND_PRICES[lands]
+                    lands += 1
+            elif op in ("BUY_SEED", "BUY_ANIMAL", "BUY_PRODUCT") and len(order) >= 3:
+                try:
+                    qty = int(order[2])
+                except (TypeError, ValueError):
+                    continue
+                if qty <= 0:
+                    continue
+                if op == "BUY_SEED":
+                    per_fixed[t] += _SEED_COST.get(order[1], 0) * qty
+                elif op == "BUY_ANIMAL":
+                    per_fixed[t] += _ANIMAL_COST.get(order[1], 0) * qty
+                else:
+                    per_units[t] += qty
+    fixed = [0.0] * (n + 1)
+    units = [0] * (n + 1)
+    for t in range(n - 1, -1, -1):
+        fixed[t] = fixed[t + 1] + per_fixed[t]
+        units[t] = units[t + 1] + per_units[t]
+    return fixed, units
+
+
+_CASH_FIXED, _CASH_UNITS = _cash_requirement(_ROUTE)
+
+
+def _cash_needed(step, wheat_price):
+    """What the rest of the route still has to pay, from `step` on."""
+    idx = min(max(int(step), 0), len(_CASH_FIXED) - 1)
+    return _CASH_FIXED[idx] + _CASH_UNITS[idx] * wheat_price * _METER_BUY_MARGIN
+
+
+def _sellable_above(item, inventory, limit):
+    """How many of the next `limit` units still clear at or above the floor."""
+    params = _MARKET_PARAMS.get(item)
+    if params is None:
+        return limit
+    floor = _METER_FLOOR * params[0]
+    n = 0
+    while n < limit and _price_at(item, inventory + n) >= floor:
+        n += 1
+    return n
+
+
+def _meter_state(obs, step):
+    seat = _seat(obs)
+    state = _METER_STATE[seat]
+    if step == 0 or step < state.get("last_step", -1):
+        state = {"held": {}}
+        _METER_STATE[seat] = state
+    state.setdefault("held", {})
+    state["last_step"] = step
+    return state
+
+
+def _meter_sells(obs, action, step):
+    """Withhold units that would clear below the floor, inside the cash envelope.
+
+    Three releases end withholding, because unsold stock scores $0 and the shed
+    is the binding constraint -- this route already peaks at 100/100:
+
+      * **solvency** -- `money < _cash_needed(step)` hands the schedule straight
+        back to the route. This is the envelope, and it is the only reason this
+        is not #23's deferral experiment run a fourth time.
+      * **shed pressure** -- `obs.private.shed` predates this turn's PLACE and
+        the end-of-day drop, so it is a *lower* bound; the threshold sits well
+        under `shedCapacity` and everything held goes the moment it trips.
+      * **endgame** -- from `_METER_FLUSH_STEP` on, everything goes at whatever
+        the market pays.
+
+    Held quantities are notional: the route already asks to sell more MILK than
+    the shed holds, so a withheld unit may never have existed. That only ever
+    costs a wasted order slot, never a sale, because the interpreter drops a SELL
+    it cannot fill and the layer only ever appends into free slots.
+    """
+    if not _METER_ITEMS:
+        return action
+    orders = list(action.get("market") or [])
+    state = _meter_state(obs, step)
+    held = state["held"]
+    if not orders and not held:
+        return action
+
+    farm = _farm(obs, _seat(obs))
+    inventory = dict(_get(_get(obs, "market", {}) or {}, "inventory", {}) or {})
+    shed = _get(_get(obs, "private", {}) or {}, "shed", {}) or {}
+
+    wheat = _price_at("WHEAT", int(inventory.get("WHEAT", _MARKET_I0) or _MARKET_I0))
+    money = float(_get(farm, "money", 0.0) or 0.0)
+    occupancy = sum(v for v in shed.values() if isinstance(v, int))
+    release = (
+        money < _cash_needed(step, wheat)
+        or step >= _METER_FLUSH_STEP
+        or occupancy >= _METER_SHED_RELEASE
+    )
+
+    out = []
+    for order in orders:
+        if not (_is_sell(order) and order[1] in _METER_ITEMS):
+            out.append(order)
+            continue
+        item = order[1]
+        try:
+            qty = max(0, int(order[2]))
+        except (TypeError, ValueError):
+            out.append(order)
+            continue
+        inv = int(inventory.get(item, _MARKET_I0) or _MARKET_I0)
+        if release:
+            qty += held.pop(item, 0)
+        else:
+            room = max(0, _METER_MAX_HOLD - sum(held.values()))
+            withhold = min(qty - _sellable_above(item, inv, qty), room)
+            if withhold > 0:
+                held[item] = held.get(item, 0) + withhold
+                qty -= withhold
+        if qty <= 0:
+            continue
+        inventory[item] = inv + qty
+        out.append([order[0], item, qty])
+
+    # Drain the backlog on the turns the route is not already selling it: into
+    # the floor once the town's drain has lifted the price back, all at once on
+    # a release. Appended only into slots the route left free, so nothing the
+    # interpreter would have processed is pushed past `maxMarketOrdersPerTurn`.
+    for item in _METER_ITEMS:
+        n = held.get(item, 0)
+        if n <= 0 or len(out) >= _MAX_MARKET_ORDERS:
+            continue
+        inv = int(inventory.get(item, _MARKET_I0) or _MARKET_I0)
+        take = n if release else _sellable_above(item, inv, n)
+        if take <= 0:
+            continue
+        held[item] = n - take
+        inventory[item] = inv + take
+        out.append(["SELL", item, take])
+
+    action["market"] = out
+    return action
+
+
 def agent(obs, config=None):
     try:
         step = _step_index(obs, config)
         action = _copy_action(_route_at(step))
         action = _repair_weeds(obs, action, step)
+        action = _meter_sells(obs, action, step)
         action = _rank_sells(obs, action)
         return _align_hands(action, obs)
     except Exception:

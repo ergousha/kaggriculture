@@ -121,31 +121,65 @@ COUNTERS: dict[str, int] = {}
 
 
 def _install_instrumentation(me_index: int = 0):
-    """Count what the observation cannot show us: shed overflow and no-op actions.
+    """Count what the observation cannot show us: shed overflow, no-op unit
+    actions, and market orders that failed for cash.
 
-    Both counters must be attributed to ONE player or they are meaningless. The
-    interpreter processes players in index order every turn -- `interpreter()`
-    loops `for i, s in enumerate(state)` for unit actions, and `_end_of_day()`
-    loops `for player_id, farm in enumerate(obs0.farms)` for the shed drop -- so
-    the first distinct farm/private object seen each turn belongs to player 0.
-    We map object identity to player index on that basis.
+    Every counter has to be attributed to ONE seat or it is meaningless, and the
+    interpreter's helpers do not carry a player index -- `_drop_inventories_to_shed`
+    takes a bare `private`, `_commit_unit` a bare `farm`. So the seat is read off
+    object identity, from a map rebuilt at the top of `_process_market`, which is
+    handed `state` and therefore knows the real order.
+
+    Rebuilding it every turn is not belt-and-braces, it is required.
+    `kaggle_environments` re-materialises the observation between steps, so a farm
+    is a *different object* on almost every turn -- 59 distinct farm ids in a
+    48-step episode. The previous scheme ("the first distinct object seen belongs
+    to player 0", numbered by insertion order) therefore accumulated one stale
+    entry per turn and silently swapped the seats as soon as CPython recycled an
+    id, which made `shed_overflow_lost` non-reproducible across two runs of the
+    same episode. Private objects are stable for a whole episode and are the
+    preferred key; `farm` is only used by `_do_buy_land`, which has nothing else,
+    and which only ever runs inside a `_process_market` call that just refreshed
+    the map.
     """
     from kaggle_environments.envs.kaggriculture import kaggriculture as K
 
     if getattr(K, "_arena_instrumented", False):
         K._arena_me_index = me_index  # pyrefly: ignore [missing-attribute]
+        K._arena_seats.clear()  # pyrefly: ignore [missing-attribute]
         return K
+    seats: dict[int, int] = {}
     K._arena_me_index = me_index  # pyrefly: ignore [missing-attribute]
+    K._arena_seats = seats  # pyrefly: ignore [missing-attribute]
     orig_drop = K._drop_inventories_to_shed
     orig_apply = K._apply_unit_action
+    orig_market = K._process_market
 
-    seen_order: dict[int, int] = {}
+    def refresh(state) -> None:
+        seats.clear()
+        for i, s in enumerate(state):
+            seats[id(s.observation.private)] = i
+        for i, farm in enumerate(state[0].observation.farms):
+            seats[id(farm)] = i
+
+    # `_apply_unit_action` runs *before* `_process_market` on every turn, so the
+    # identity map is a turn stale there and the objects it would key on have
+    # already been replaced. It does carry `idx` though, and `interpreter` calls
+    # it as (farmer, hands...) for player 0 and then the same for player 1 -- so
+    # `idx == 0` is exactly a seat boundary, and counting those is exact without
+    # touching identity at all.
+    unit_phase = {"seat": -1}
+
+    def process_market(state, env):
+        refresh(state)
+        unit_phase["seat"] = -1
+        return orig_market(state, env)
 
     def player_of(obj) -> int:
-        key = id(obj)
-        if key not in seen_order:
-            seen_order[key] = len(seen_order) % 2
-        return seen_order[key]
+        # -1 before the first refresh, i.e. for the unit actions of the very
+        # first interpreted turn. Those are attributed to neither seat rather
+        # than guessed at.
+        return seats.get(id(obj), -1)
 
     def drop(private, capacity):
         if player_of(private) != K._arena_me_index:
@@ -179,7 +213,9 @@ def _install_instrumentation(me_index: int = 0):
     }
 
     def apply(farm, private, idx, action, board_size, day, turns_per_day, shed_capacity=100):
-        if player_of(farm) != K._arena_me_index:
+        if idx == 0:
+            unit_phase["seat"] += 1
+        if unit_phase["seat"] != K._arena_me_index:
             return orig_apply(
                 farm, private, idx, action, board_size, day, turns_per_day, shed_capacity
             )
@@ -208,10 +244,57 @@ def _install_instrumentation(me_index: int = 0):
                 COUNTERS[f"noop_{op}"] = COUNTERS.get(f"noop_{op}", 0) + 1
         return res
 
+    # -- failed market orders (issue #30) -----------------------------------
+    #
+    # `_do_hire` returns silently when `farm["money"] < cost`, and `_commit_unit`
+    # returns False and aborts the rest of that order the same way. Neither shows
+    # up in the replay, the observation or the final cash -- the hand simply never
+    # exists and the throughput it would have produced never happens. That is the
+    # exact failure mode any sell-metering layer has to avoid, so #30's gate is
+    # "zero failed HIRE / BUY relative to the incumbent" and these are the
+    # counters that read it. A failed SELL is counted too but is not a fault: the
+    # route deliberately over-orders MILK against a shed that may be empty.
+
+    orig_hire = K._do_hire
+    orig_land = K._do_buy_land
+    orig_commit = K._commit_unit
+
+    def do_hire(farm, private, board_size, mult=K.FARM_HAND_COST_MULT):
+        if player_of(private) != K._arena_me_index:
+            return orig_hire(farm, private, board_size, mult)
+        before = len(farm["hands"])
+        out = orig_hire(farm, private, board_size, mult)
+        if len(farm["hands"]) == before:
+            COUNTERS["orders_failed_hire"] = COUNTERS.get("orders_failed_hire", 0) + 1
+        return out
+
+    def do_buy_land(farm, board_size):
+        if player_of(farm) != K._arena_me_index:
+            return orig_land(farm, board_size)
+        before = len(farm["unlocked_quadrants"])
+        # A fourth BUY_LAND has nothing left to buy. That is a route defect, not
+        # a liquidity failure, so it is not counted as one.
+        exhausted = before - 1 >= len(K.LAND_PRICES)
+        out = orig_land(farm, board_size)
+        if len(farm["unlocked_quadrants"]) == before and not exhausted:
+            COUNTERS["orders_failed_land"] = COUNTERS.get("orders_failed_land", 0) + 1
+        return out
+
+    def commit_unit(op, item, price, farm, private, market, shed_capacity=100):
+        ok = orig_commit(op, item, price, farm, private, market, shed_capacity)
+        if not ok and player_of(private) == K._arena_me_index:
+            key = "orders_failed_sell" if op == "SELL" else "orders_failed_buy"
+            COUNTERS[key] = COUNTERS.get(key, 0) + 1
+        return ok
+
     K._drop_inventories_to_shed = drop
     K._apply_unit_action = apply
-    # The interpreter captured references at def time only for these two names,
-    # both of which it looks up on the module at call time, so patching sticks.
+    K._process_market = process_market
+    K._do_hire = do_hire
+    K._do_buy_land = do_buy_land
+    K._commit_unit = commit_unit
+    # The interpreter looks every one of these up on the module at call time, so
+    # patching sticks.
     K._arena_instrumented = True  # pyrefly: ignore [missing-attribute]
     return K
 
@@ -314,6 +397,10 @@ def run_episode(job: dict) -> dict:
         "turn_p95": round(pct(0.95), 5),
         "turn_max": round(max(durations), 5) if durations else 0.0,
         "shed_overflow_lost": COUNTERS.get("shed_overflow_lost", 0),
+        "orders_failed_hire": COUNTERS.get("orders_failed_hire", 0),
+        "orders_failed_land": COUNTERS.get("orders_failed_land", 0),
+        "orders_failed_buy": COUNTERS.get("orders_failed_buy", 0),
+        "orders_failed_sell": COUNTERS.get("orders_failed_sell", 0),
         "actions_total": COUNTERS.get("actions_total", 0),
         "actions_noop": COUNTERS.get("actions_noop", 0),
         "actions_pass": COUNTERS.get("actions_pass", 0),
@@ -337,6 +424,15 @@ def aggregate(results: list[dict], decision_logs: list[str] | None = None) -> di
     timeout_cnt = sum(r["timeouts"] for r in results)
     invalid_cnt = sum(r["invalid"] for r in results)
     shed_lost = sum(r["shed_overflow_lost"] for r in results)
+    failed = {
+        k: sum(r.get(k, 0) for r in results)
+        for k in (
+            "orders_failed_hire",
+            "orders_failed_land",
+            "orders_failed_buy",
+            "orders_failed_sell",
+        )
+    }
     act_total = sum(r["actions_total"] for r in results)
     act_noop = sum(r["actions_noop"] for r in results)
     act_pass = sum(r["actions_pass"] for r in results)
@@ -361,6 +457,7 @@ def aggregate(results: list[dict], decision_logs: list[str] | None = None) -> di
         "turn_p95": round(max(r["turn_p95"] for r in results), 5) if n else 0.0,
         "turn_max": round(max(r["turn_max"] for r in results), 5) if n else 0.0,
         "shed_overflow_lost": shed_lost,
+        **failed,
         "actions_total": act_total,
         "actions_noop": act_noop,
         "actions_pass": act_pass,

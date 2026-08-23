@@ -1345,3 +1345,295 @@ Two results are worth carrying into #30 and anything after it:
    decides where the next hand spawns. Any future operator that changes a unit's position —
    `shift_task_block` included — needs `board_paths.verify_schedule` or an equivalent, not
    a local argument about the site it edited.
+
+---
+
+## [#30] Co-optimising milk metering with the route's cash schedule — the envelope works, the shed is the real constraint
+
+**The premise.** MILK realises **$17.0/unit against a $160 base** (#27's measurement; re-measured
+here at **$21.2** on the v0.3.1 route). Three previous attempts to fix that by metering sales
+failed, each for a different reason, and #30's diagnosis was that all three moved one leg of a
+two-legged decision: *"the route is not a production plan with a market layer attached — it is a
+cash schedule."* Withhold a sale and the next `HIRE` fails for cash.
+
+This issue is the first attempt with the envelope actually computed. The headline is that
+**the diagnosis was right and the fix does not pay**: the liquidity failure is completely
+eliminated — zero failed `HIRE` orders in 1,800 episodes across every metering arm — and the
+route still loses, because the binding constraint was never liquidity. It is the shed.
+
+### The instrument: per-fill attribution, committed this time
+
+`scripts/analyse_market_fills.py` hooks `_commit_unit`, `_do_hire` and `_do_buy_land` and reports
+realised $/unit and *failed* orders. It attributes each one to a seat from a farm-identity map
+rebuilt at the top of every `_process_market` call, which is handed `state` and therefore knows
+the real order — rebuilt every turn because the observation is re-materialised between steps and
+a farm is a different object each time. (The arena's own counters were not doing that. See the
+measurement-bug section below.)
+A failed `HIRE` is invisible in the replay, the observation and the final cash — the hand simply
+never exists — so this is the only way to read #30's gate. v0.3.1 vs `opponents/v0_3_1.py`,
+seed 2000000:
+
+| product | our units | our $/unit | base | vs base |
+| --- | --- | --- | --- | --- |
+| WOOL | 142 | $206.3 | $200 | 103% |
+| WHEAT | 596 | $41.7 | $25 | 167% |
+| CARROT | 15 | $42.3 | $35 | 121% |
+| FERTILIZER | 242 | $51.8 | $100 | 52% |
+| STRAWBERRY | 249 | $61.8 | $120 | 52% |
+| MELON | 120 | $125.6 | $250 | 50% |
+| **MILK** | **254** | **$21.2** | **$160** | **13%** |
+
+The per-fill traces are the shape #30 describes:
+
+```
+MILK        d8 12@$159  d11 6@$122  d12 5@$101  d13 6@$81  d14 9@$52  d15 18@$10
+            d16 6@$4 ... d20 27@$1 ... d29 27@$10
+STRAWBERRY  d15 6@$199  d18 13@$191  d21 28@$160  d22 31@$69  d23 33@$5  d24 18@$1 ...
+```
+
+### The envelope, and why it is a proof rather than a heuristic
+
+`search/cash_schedule.py` computes, per step, what the rest of the route still has to pay:
+
+* `HIRE` costs `fib(hires so far *today*)` and `_end_of_day` resets the counter, so the route's
+  own order stream fixes the whole sequence — 277 hires, **$5,977**;
+* `BUY_LAND` walks `[1000, 2000, 4000]` in order — 2 orders, **$3,000**;
+* `BUY_SEED` and `BUY_ANIMAL` are catalogue prices — **$12,530** over 98 and 10 orders;
+* `BUY_PRODUCT` is the one term that is *not* knowable offline (it quotes against a shared
+  inventory both seats move), so it is carried as a **unit count** — 522 WHEAT — and priced from
+  the live observation at a 1.25× safety multiple.
+
+Exactly-priced outlay: **$21,507**. Money only ever leaves the farm through those orders, so
+
+```
+money(u) >= money(t) - spent(t..u) >= need(t) - spent(t..u) = need(u)     for all u >= t
+```
+
+Hold `need(t)` and **no future order in the route can fail.** That inequality is the whole safety
+argument, and `tests/test_cash_schedule.py` pins all three copies of the catalogue (env, module,
+baked agent) against `kaggle_environments` so it cannot rot.
+
+**When the envelope opens is the first real finding.** Measured against the actual cash
+trajectory (seed 2000000), the route runs at **$13–$895 of cash through day 10** — it is a razor
+schedule, not a comfortable one — and `money >= need(t)` first holds on **day 17**:
+
+| day | cash | remaining requirement | headroom |
+| --- | --- | --- | --- |
+| 8 | $13 | $35,771 | −$35,758 |
+| 12 | $10,883 | $24,020 | −$13,137 |
+| 16 | $18,635 | $21,400 | −$2,765 |
+| **17** | **$21,969** | **$20,892** | **+$1,077** |
+| 22 | $40,068 | $15,467 | +$24,601 |
+| 29 | $56,712 | $54 | +$56,658 |
+
+MILK's price has already collapsed to **$4** by day 17. So the envelope is open exactly where
+there is nothing left to protect, and closed exactly where the money is. That is not a defect in
+the envelope — it is what makes #23's flat floors catastrophic, stated precisely for the first
+time.
+
+### The metering layer, and the ten-arm sweep
+
+`_meter_sells` in `AGENT_TEMPLATE` withholds units that would clear below `floor × base`, and
+releases everything on any of three conditions: **solvency** (`money < need(step)` hands the
+schedule straight back to the route), **shed pressure** (`obs.private.shed` is a *lower* bound —
+it predates this turn's `PLACE` and the end-of-day drop — so the threshold sits well under
+`shedCapacity`), and the **endgame** (from step 672 everything goes; a held unit at the horn
+scores $0). It never touches a product it is not metering, never moves a non-`SELL` order, and
+only ever appends into slots the route left free, so a turn can never be pushed past
+`maxMarketOrdersPerTurn` and drop a `HIRE` off its tail. `tests/test_meter_layer.py` pins all of it.
+
+Ten arms, each *the shipped file with those constants rewritten*, on one identical grid —
+30 mid seeds × 6 opponents = 180 episodes each, 1,800 total, common random numbers on both axes,
+seat 0 fixed (`scripts/sweep_meter.py`):
+
+| variant | mean panel win | worst opp | mean cash | mean margin | margin CVaR₅ | shed lost | **failed HIRE** |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **`m_off` (v0.3.1)** | **62.8%** | **20.0%** | **$106,866** | **$43,349** | **−$4,042** | **1,188** | **0** |
+| `m_both_f55_h8` | 58.3% | 13.3% | $106,790 | $43,086 | −$4,527 | 1,352 | 0 |
+| `m_milk_f40` | 56.1% | 23.3% | $106,554 | $42,646 | −$5,313 | 2,193 | 0 |
+| `m_both_f20` | 55.0% | 16.7% | $106,634 | $42,856 | −$4,627 | 2,088 | 0 |
+| `m_straw_f55` | 54.4% | 13.3% | $106,622 | $42,624 | −$5,567 | 1,924 | 0 |
+| `m_milk_f55` | 53.3% | 13.3% | $106,571 | $42,583 | −$5,273 | 2,255 | 0 |
+| `m_both_f55` | 52.8% | 13.3% | $106,478 | $42,379 | −$6,399 | 2,475 | 0 |
+| `m_both_f55_h48` | 51.1% | 13.3% | $106,282 | $41,750 | −$7,158 | 2,756 | 0 |
+| `m_milk_f80` | 49.4% | 6.7% | $106,534 | $42,440 | −$5,323 | 2,430 | 0 |
+| `m_milk_unbounded` | 44.4% | 10.0% | $100,283 | $32,858 | −$36,207 | 20,248 | 0 |
+
+**Read the last two columns first.** Zero failed `HIRE` orders in all 1,800 episodes, in every
+arm, including the one that holds every unit of milk it produces for eleven days. #23's
+deferral collapsed to $1,090 against a $104,027 baseline *because hands stopped materialising*;
+the envelope removes that failure mode completely and provably. The mechanism #30 identified was
+the right one.
+
+Failed `BUY` is **288 in every single arm**, the incumbent included — those are the route's own two
+`BUY_PRODUCT` misses per episode and no metering configuration adds one. So two thirds of #30's
+instrumentation gate passes everywhere and the third, "zero increase in shed overflow", fails
+everywhere.
+
+And the route still loses, monotonically in how much stock is held. What replaces the liquidity
+failure is visible in the same table: **shed overflow rises with the hold** — 1,188 → 2,255 →
+2,756 → 20,248 discarded items over 180 episodes each — while mean cash barely moves. The layer
+is not losing the metered product's revenue. It is losing everything else's.
+
+### Why: the shed is the binding constraint, and marginal revenue on a glutted product is ~$0
+
+`shedCapacity` is 100 and the incumbent already peaks at 100/100 (measured, seed 2000000, day 29).
+The unbounded arm makes the mechanism unmistakable on a single episode:
+
+| | incumbent | `m_milk_unbounded` |
+| --- | --- | --- |
+| MILK | 254 u @ $21.2 | 87 u @ ~$5 |
+| STRAWBERRY | 249 u @ $61.8 | **151 u @ $96.5** |
+| WOOL | 142 u @ $206.3 | **104 u @ $196.2** |
+| MELON | 120 u @ $125.6 | 103 u |
+| final cash | **$63,601** | **$49,999** |
+
+Held milk occupies shed slots, and the goods it displaces are `WOOL` at $206/unit and
+`STRAWBERRY` at $62–97/unit. Note what happened to strawberry's *price*: it went **up**, from
+$61.8 to $96.5, because we sold 98 fewer units into the same market. That is the whole economics
+of this route in one line — **marginal revenue on a glutted product is close to zero**, so a
+shed slot spent holding milk is a shed slot not spent on wool, and the trade is $1 against $200.
+
+The town cannot rescue it either. MILK drains at 18/day at full unlock and the two seats supply
+~500 units over 22 days; withholding ours entirely still leaves the market above I₀, so the price
+never comes back inside the episode. The unbounded arm's milk backlog waits eleven days and
+flushes on day 28 at **$3**.
+
+### The joint operator: a purchase is not a free variable either
+
+Work item 3 — *move a `SELL` and the `BUY` it funds together* — is implemented as
+`search/route_search.op_move_sell_and_buy`, with a `scope="all"` bulk form because a single-site
+move of one sale out of 82 is far below the noise floor of a 180-episode grid.
+
+The first bulk measurement failed in a way that is more interesting than the result. Shifting
+all 78 (SELL, funder) pairs by ±6 steps, seed 2000000:
+
+| route | our cash | opponent | MILK units | STRAWBERRY units | WOOL units |
+| --- | --- | --- | --- | --- | --- |
+| incumbent | **$63,601** | $63,601 | 254 | 249 | 142 |
+| all pairs +6 | $27,239 | $102,121 | 78 | **16** | 74 |
+| all pairs −6 | $19,113 | $102,966 | 79 | **4** | 54 |
+
+Realised $/unit went **up** on every product in both arms. What collapsed was *volume*: the route
+stopped producing. #30's framing — "sale timing and purchase timing are one decision" — is right
+but incomplete. It is a **three-way** coupling: sale → purchase → the unit action the purchase
+feeds.
+
+* Forward: `_apply_unit_action` runs for every unit *before* `_process_market`, so a `BUY` on step
+  t is only usable from t+1, and a `PLANT` whose seed has not arrived is not merely skipped — the
+  interpreter drops **every** `PLANT` of that crop that turn. Delay a `BUY_SEED` past its `PLANT`
+  and the field stops.
+* Backward: pulling a sale earlier does not pull the *production* that fills it. The sale earns
+  nothing and the purchase it funds spends anyway — #23's failure with the sign flipped.
+* `HIRE` cannot move at all in either direction. A missing hand does not idle: `_align_hands`
+  truncates the hands list to the live count, so **every later slot in that turn's trace shifts by
+  one** and the whole hand assignment for the turn is wrong.
+
+So the operator now clamps both directions, and the clamp census is the second real finding of
+this issue:
+
+| funded order | orders | cannot be delayed at all | median slack | max |
+| --- | --- | --- | --- | --- |
+| `HIRE` | 277 | **277** | 0 | 0 |
+| `BUY_LAND` | 2 | **2** | 0 | 0 |
+| `BUY_SEED` | 98 | 31 | 3 | 450 |
+| `BUY_PRODUCT` | 71 | 6 | 13 | 43 |
+| `BUY_ANIMAL` | 10 | 3 | 2 | 6 |
+| **total** | **458** | **319 (70%)** | | |
+
+**Seven out of ten of the route's funded orders cannot be delayed by a single step**, and 277 of
+those are hires. There is very little room to move the BUY into, which is the structural reason
+#30's stronger version cannot buy the sale much time.
+
+With both clamps in place the operator is safe — no route it emits produces an invalid action,
+and forward moves no longer starve anything — and it is still a reject. Same grid, 30 mid seeds ×
+6 opponents = 180 episodes per route, 1,620 total:
+
+| route | hash | pairs moved | mean panel win | worst opp | mean cash | mean margin |
+| --- | --- | --- | --- | --- | --- | --- |
+| **incumbent (v0.3.1)** | `e8c035f9d0` | — | **62.8%** | **20.0%** | **$106,866** | **$43,349** |
+| `joint+3` | `9397214e18` | 5 | 55.6% | 10.0% | $106,731 | $43,027 |
+| `joint+1` | `2c95a64145` | 11 | 55.0% | 6.7% | $106,539 | $42,713 |
+| `joint+6` | `d70b0e9abe` | 22 | 49.4% | 6.7% | $106,561 | $42,534 |
+| `joint+12` | `7ae5bae095` | 16 | 46.7% | 0.0% | $106,277 | $41,838 |
+| `joint−1` | `5fd4602efe` | 6 | 33.3% | 0.0% | $97,838 | $31,704 |
+| `joint−3` | `1debe2168a` | 45 | 33.3% | 0.0% | $66,865 | −$5,684 |
+| `joint−6` | `a310028dab` | 18 | 33.3% | 0.0% | $74,186 | $1,052 |
+| `joint−12` | `0cda56f600` | 20 | 33.3% | 0.0% | $74,662 | $2,145 |
+
+Eight arms, eight losses, monotone in how far the pair moves. **`joint+3` moves five order pairs
+out of 927 and costs 7.2 points of panel win rate.** Backward moves are catastrophic even at one
+step, and even with the deposit clamp: pulling six sales one step earlier drops mean cash by
+$9,028. The route is not merely a cash schedule — it is a *tuned* one, and its sale turns are
+pinned on both sides at once.
+
+### A measurement bug found by writing the gate down: the arena's counters were on the wrong seat
+
+#30's gate is stated in terms of `shed_overflow_lost` and failed orders, so those counters had to
+be trusted, and they could not be. `local_arena._install_instrumentation` attributed every counter
+by object identity, on the rule *"the first distinct farm/private object seen each turn belongs to
+player 0"*, numbering entries by insertion order into one process-wide dict.
+
+Two things are wrong with that. The dict was never cleared between episodes, and a Phase 2 worker
+runs hundreds — but the deeper problem is that `kaggle_environments` **re-materialises the
+observation between steps**, so a farm is a different object on almost every turn: 59 distinct
+farm ids in a 48-step episode. The map grew by two entries per turn, and the moment CPython
+recycled an id the seats swapped. The symptom is unambiguous once you look for it — the *same*
+episode, run twice in one process, returned `shed_overflow_lost` of 7 and then 1.
+
+The fix is to stop guessing. The market-phase counters key on a seat map rebuilt from `state` at
+the top of `_process_market`, which is handed the players in order. The unit-phase counter cannot
+use identity at all — `_apply_unit_action` runs *before* `_process_market`, so the objects it
+would key on have already been replaced — but it carries `idx`, and `interpreter` calls it as
+(farmer, hands…) for player 0 and then again for player 1, so `idx == 0` is exactly a seat
+boundary. `tests/test_arena_attribution.py` pins both halves: the same episode twice must give the
+same counters, and a seat driving the `pass` agent must report one action per turn while a seat
+driving the route reports many, with and without `--swap`.
+
+**This invalidates previously reported shed-overflow figures**, including #25's "shed overflow ON
+→ OFF, 10 → 45" table and the "25 → 15 items lost" line in #23's. Those comparisons were between
+two arms measured the same wrong way, so their *direction* is probably intact, but the magnitudes
+are not evidence. Win rates, cash and margins are unaffected throughout — they come from the
+episode reward, not from this instrumentation. The `actions_total` / `noop_rate` telemetry was
+affected too and is now correct for the first time (6,914 unit actions per episode against the
+route's 6,999 unit-turns, which is the ramp-up of the hand count).
+
+### Verdict
+
+**Nothing ships. `main.py` stays on v0.3.1.** #30's first gate — "panel win rate strictly better
+than the incumbent" — is failed by all eighteen candidates measured (ten metering arms, eight
+joint-move arms), so no candidate reaches the held-out head-to-head, the ladder or the overflow
+comparison. This is the fourth attempt at this idea and the first one to fail for a reason that
+was not already known.
+
+What #30 got right, and it is worth stating plainly because three write-ups now depend on it:
+
+* **The diagnosis was correct.** The route *is* a cash schedule, deferral *does* break it through
+  liquidity, and the envelope *does* fix that — **zero failed `HIRE` orders in 1,800 episodes**,
+  including in an arm that hoards eleven days of milk. #23's $1,090-against-$104,027 collapse is
+  solved.
+* **The prescription was wrong, and the sweep says why.** Liquidity was never the binding
+  constraint; it was the *first* one to bind. Behind it sits `shedCapacity`, and behind that sits
+  a market where a glutted product's marginal revenue is approximately zero. A shed slot holding
+  milk at $2 is a slot not holding wool at $206, and no amount of timing changes that ratio.
+
+Four things to carry forward:
+
+1. **Marginal revenue on MILK and STRAWBERRY is ~$0, so the pot #30 quotes is not there.** Holding
+   98 strawberries back raised their realised price from $61.8 to $96.5 and *reduced* total
+   strawberry revenue. The "$31k of foregone milk revenue" is an accounting figure, not a
+   recoverable one: the town drains 18 MILK/day and the two seats supply ~500 over 22 days. The
+   next attempt at this pot has to reduce *production* of the glutted products, not re-time their
+   sale — which is #27's lever, and #27 already took the part of it that pays.
+2. **A purchase is not a free variable.** 319 of the route's 458 funded orders cannot be delayed
+   by one step, all 277 hires among them. Any future operator that moves a market order has to
+   own `_funder_forward_slack` / `_sell_backward_slack` or an equivalent, exactly as #29 concluded
+   that any operator moving a *unit* has to own `board_paths.verify_schedule`.
+3. **The route is far more sensitive than its size suggests.** Moving five order pairs out of 927
+   costs 7.2 points of panel win rate. That is the strongest argument yet for the repo's standing
+   rule that a local accept is a veto and not a forecast — and against any future change that
+   perturbs many sites at once on the theory that each one is small.
+4. **Write the gate down before you trust the instrument.** The only reason the seat-attribution
+   bug was found is that #30's gate is phrased in terms of two counters nobody had previously had
+   to rely on. Every gate in this repo that names a number should be read as also asserting that
+   the number is measured correctly, and that assertion had never been tested.

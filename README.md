@@ -32,6 +32,9 @@ search/evolution.py           # population-based search over the same vector
 search/harness.py             # paired-seed match harness used by both searches
 search/smoke_test.py          # unit tests for the search stack
 search/route_search.py        # issue #26: mutation-and-accept over the raw route (blocks #27-#30)
+search/cash_schedule.py       # issue #30: what the route still has to pay for, step by step
+scripts/analyse_market_fills.py # issue #30: realised $/unit and failed HIRE/BUY, per episode
+scripts/sweep_meter.py        # issue #30: renders and scores sell-metering variants of main.py
 opponents/adaptive.py         # sparring partner (see "Opponents" for provenance)
 opponents/vX_Y_Z.py           # every submitted version, kept as a sparring partner
 scripts/mine_daily.py         # mines Kaggle's daily episode dumps into strategy fingerprints
@@ -1077,7 +1080,7 @@ The six operators, each `--no-<name>` away from off, matching the issue's list:
 | `swap_herd` | convert a `BUY_ANIMAL COW` to `SHEEP` (#27) | no — cadence repair (interval 3→2) is #27's operator, deliberately not approximated here |
 | `assign_idle` | give a PASS turn a productive task (#28) | half — gated to units already adjacent to farmed ground, so no unit travels |
 | `repath` | re-path a movement run to the Manhattan-shortest walk between its fixed endpoints (#29) | **yes, and it proves it** — `search/board_paths.py` re-simulates positions and refuses to emit a route where any op moved off its step or its tile |
-| `move_sell_and_buy` | move a `SELL` and the `BUY` it funds together (#30) | placeholder — returns `None` until #30's joint operator lands |
+| `move_sell_and_buy` | move a `SELL` and the `BUY` it funds together (#30) | half, and it says which half — the pair may not move past the unit op the purchase feeds (`_funder_forward_slack`) or past the deposit that fills the sale (`_sell_backward_slack`); a `HIRE` never moves at all |
 
 Measured budget on 12 workers: one candidate evaluation is **30 seeds × 6 panel = 180
 episodes ≈ 35 min** at ~2.4 s/episode (Phase 2 screen measured 0.8 ep/s on 8 workers).
@@ -1144,6 +1147,58 @@ resolves decides where the next hand starts its day. One segment in the incumben
 (slot 6, steps 506–508) re-paths onto `(5,4)` and pushes hand 12's spawn from `(5,4)` to
 `(4,5)`, moving all nine of its ops that day one tile off. `repath` verifies every rewrite
 and discards that one. Full write-up in `docs/experiments.md`.
+
+### Metering milk against the cash schedule: the envelope works, the shed is the constraint (issue #30)
+
+```bash
+uv run python -m search.cash_schedule --profile                    # the requirement, per day
+uv run python scripts/analyse_market_fills.py --seed 2000000       # realised $/unit + failed orders
+uv run python scripts/sweep_meter.py --seeds 30                    # the ten-arm metering sweep
+uv run python -m search.route_search --panel local --sweep-joint 1,3,6,-3,-6
+```
+
+MILK realises **$21.2 against a $160 base** on the shipped route — 13% — and #30's diagnosis of
+why three previous attempts to fix that failed is exactly right: *the route is a cash schedule*,
+277 `HIRE` orders and every `BUY` are timed against money it expects to already have, and
+`_do_hire` skips silently when it cannot afford one. `search/cash_schedule.py` computes what the
+rest of the route still has to pay at every step — hires at `fib(hires today)`, the land ladder,
+catalogue seed and animal prices, exactly $21,507, plus 522 `BUY_PRODUCT` units priced live —
+and since money only leaves the farm through those orders, holding that much cash **proves** no
+future order can fail.
+
+**It works, and it is not enough.** Across 1,800 episodes and ten metering arms there are
+**zero failed `HIRE` orders** and not one extra failed `BUY`, including in an arm that hoards
+eleven days of milk; #23's $1,090-against-$104,027 collapse is solved outright. Every arm still
+loses on panel win rate (62.8% incumbent vs 58.3% for the best), because liquidity was only the
+*first* constraint to bind. Behind it is `shedCapacity` — the route already peaks at 100/100 — and behind that a market
+where a glutted product's marginal revenue is about zero. Holding milk cost 98 strawberries and
+38 wool: strawberry's realised price *rose* from $61.8 to $96.5 and its total revenue still fell.
+A shed slot holding milk at $2 is a slot not holding wool at $206. Shed overflow rises with
+the hold in every arm — 1,188 discarded items for the incumbent against 2,475 and, unbounded,
+20,248 — which is the third of #30's three instrumentation gates and the only one that fails.
+
+Writing that gate down turned up a bug in the instrument itself: the arena attributed
+`shed_overflow_lost` and the no-op counters by object identity, and `kaggle_environments`
+re-materialises the observation between steps, so the seats swapped whenever CPython recycled an
+id. The same episode run twice reported different overflow. Seat attribution is now rebuilt from
+`state` each turn (market phase) and read off `idx == 0` being a seat boundary (unit phase), with
+`tests/test_arena_attribution.py` pinning both. Previously reported shed-overflow magnitudes,
+including #25's, are not evidence; win rates and cash are unaffected.
+
+The joint operator (`move_sell_and_buy`, scope `all`) is the stronger version — move the sale and
+the purchase it funds together — and it adds the finding that a purchase is not a free variable
+either. It is a *three-way* coupling: sale → purchase → the unit action the purchase feeds. Delay
+a `BUY_SEED` past its `PLANT` and the interpreter drops **every** `PLANT` of that crop that turn;
+the first unclamped bulk move took STRAWBERRY from 249 units to 16 at a *higher* $/unit. **319 of
+the route's 458 funded orders cannot be delayed by a single step**, all 277 hires among them. With
+both clamps in, eight arms lose eight times: moving five order pairs out of 927 costs 7.2 points
+of panel win rate.
+
+**No agent ships; `main.py` stays on v0.3.1.** The metering layer stays in `AGENT_TEMPLATE`
+behind `_METER_ITEMS = ()` — inert (0.13 µs/turn, 0.26 ms at import) so that the next attempt
+argues with a measurement rather than rebuilding one, and so `scripts/sweep_meter.py` A/Bs the
+real file rather than a copy of it. Full write-up in `docs/experiments.md`.
+
 
 ---
 
