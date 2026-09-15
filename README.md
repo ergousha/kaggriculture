@@ -4,10 +4,10 @@ A two-tier agent for the Kaggle [Kaggriculture](https://www.kaggle.com/competiti
 competition, plus a local arena for measuring it, a macro-strategy search, and a
 submission pipeline.
 
-Verified against **kaggle-environments 1.32.6** (kaggriculture spec version `0.1.0`), which
+Verified against **kaggle-environments 1.32.7** (kaggriculture spec version `0.1.0`), which
 is what the competition runs. The engine version is load-bearing: the same game on the
 same seed pays out completely differently across releases, so a measurement taken on
-1.32.3 is not comparable to one taken on 1.32.6.
+1.32.3 is not comparable to one taken on 1.32.7.
 Python 3.12+.
 
 **v0.2.0 changed architecture.** The submission is now a *route-replay* agent: one
