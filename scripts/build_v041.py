@@ -26,7 +26,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(HERE)
-MAIN = os.path.join(PROJECT_ROOT, "main.py")
+# The builder consumes the v0.4.0-shaped chassis (kept byte-identical at
+# opponents/v0_4_0.py) and emits the v0.4.1 candidate. It cannot re-consume
+# main.py once main.py IS v0.4.1 -- the splice anchors no longer exist.
+MAIN = os.path.join(PROJECT_ROOT, "opponents", "v0_4_0.py")
 METACOUNTER = os.path.join(PROJECT_ROOT, "scratch", "public_kernels", "metacounter_agent.py")
 OUT = os.path.join(PROJECT_ROOT, "scratch", "v0_4_1_candidate.py")
 
@@ -38,11 +41,16 @@ def main() -> None:
         mc = f.read()
 
     # 1. Extract metacounter's EXP240 payload literal (the b85 blob) and its shop table.
-    m_payload = re.search(r"_R108_DATA=json\.loads\(zlib\.decompress\(base64\.b85decode\('([^']+)'\)\)\)", mc)
+    m_payload = re.search(
+        r"_R108_DATA=json\.loads\(zlib\.decompress\(base64\.b85decode\('([^']+)'\)\)\)", mc
+    )
     if not m_payload:
         sys.exit("metacounter payload literal not found")
     mc_payload = m_payload.group(1)
-    m_shops = re.search(r"_R108_SHOP_ROUTES=\{tuple\(r\['shops'\]\):r\['route'\] for r in _R108_DATA\['shops'\]\}", mc)
+    m_shops = re.search(
+        r"_R108_SHOP_ROUTES=\{tuple\(r\['shops'\]\):r\['route'\] for r in _R108_DATA\['shops'\]\}",
+        mc,
+    )
     if not m_shops:
         sys.exit("metacounter shop table line not found")
 
@@ -52,12 +60,6 @@ def main() -> None:
     assembly = v40[start:end]
 
     # 3. Compose the new assembly: v0.4.0 routes, then EXP240 routes under ids 100+.
-    exp240_block = (
-        "_ROUTES.update({int(k)+100:[list(_E['actions'][i]) for i in ids] "
-        "for k,ids in ((str(int(r['route'])-100),r['route'] and []) for r in [])})  # placeholder"
-    )
-    # The EXP240 payload stores full 719-action tapes in ['routes'][str(route_id)] as action indices.
-    # Cleanest: decode the payload once and emit tapes with the same shape as _ROUTES values.
     import base64
     import json
     import zlib
@@ -123,7 +125,9 @@ def main() -> None:
     # 7. Splice: replace assembly, router, and opening in one block.
     new_v40 = v40
     # replace the assembly block with assembly + EXP routes
-    new_assembly = assembly + "\n" + exp_routes_src + "\n_ROUTES.update(_EXP_ROUTES)\ndel _EXP_ROUTES"
+    new_assembly = (
+        assembly + "\n" + exp_routes_src + "\n_ROUTES.update(_EXP_ROUTES)\ndel _EXP_ROUTES"
+    )
     new_v40 = new_v40.replace(assembly, new_assembly)
     # replace router
     r_start = new_v40.index("def _router(observation,step,state):")
@@ -153,7 +157,9 @@ def main() -> None:
         f.write(new_v40)
     n_exp = sum(1 for r in routes if r >= 100)
     print(f"wrote {OUT}")
-    print(f"  v0.4.0 routes kept: {sum(1 for r in routes if r < 100 and r in (0,1,2,3,4,5,6,7,8,9,10,11,12))}/13")
+    print(
+        f"  v0.4.0 routes kept: {sum(1 for r in routes if r < 100 and r in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12))}/13"
+    )
     print(f"  EXP240 routes added: {n_exp}")
     print(f"  shop pairs covered by EXP240: {len(shop_routes)}")
 

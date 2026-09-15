@@ -28,9 +28,14 @@ from search import cash_schedule  # noqa: E402
 
 
 def _load_agent():
-    spec = importlib.util.spec_from_file_location(
-        "main_agent_cash", os.path.join(PROJECT_ROOT, "main.py")
+    # v0.4.x ships the multi-route public chassis: it carries no
+    # `_CASH_FIXED`/`_CASH_UNITS`/`_ROUTE` cash-envelope copies (the chassis has
+    # no metering layer). The three-copy pin targets the last agent that had
+    # them -- the route-replay v0.3.1 incumbent, kept byte-identical in opponents/.
+    agent_path = os.environ.get(
+        "CASH_SCHEDULE_AGENT", os.path.join(PROJECT_ROOT, "opponents", "v0_3_1.py")
     )
+    spec = importlib.util.spec_from_file_location("main_agent_cash", agent_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -66,6 +71,11 @@ def test_fib_matches_the_interpreters_hire_cost() -> None:
 
 
 def test_baked_requirement_matches_the_offline_module() -> None:
+    """The baked copy exists only on route-replay agents (v0.3.1 and earlier).
+
+    The v0.4.x public chassis has no metering layer and no baked envelope;
+    this pins the last artifact that has one against the offline module.
+    """
     fixed, units = cash_schedule.requirement(AGENT._ROUTE)
     assert AGENT._CASH_FIXED == fixed
     assert AGENT._CASH_UNITS == units

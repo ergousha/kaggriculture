@@ -25,6 +25,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CANDIDATES = os.path.join(PROJECT_ROOT, "candidates.jsonl")
 
 
+# The search's hash/herd pins are facts of the v0.3.1 incumbent route. v0.4.x
+# main.py is the multi-route chassis whose base tape is a different (public)
+# route, so the seed source is pinned to the frozen incumbent snapshot.
+INCUMBENT = os.environ.setdefault(
+    "ROUTE_SEARCH_SEED_FILE",
+    os.path.join(PROJECT_ROOT, "opponents", "v0_3_1.py"),
+)
+
+
 def _seed() -> list[dict]:
     return rs.load_seed(CANDIDATES if os.path.exists(CANDIDATES) else None)
 
