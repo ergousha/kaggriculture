@@ -32,9 +32,12 @@ MAX_MARKET_ORDERS = 10
 
 
 def _load_agent() -> Any:
-    spec = importlib.util.spec_from_file_location(
-        "main_agent_meter", os.path.join(PROJECT_ROOT, "main.py")
+    # v0.4.x main.py is the multi-route public chassis (no metering layer);
+    # these tests target the last agent that shipped one -- the v0.3.1 incumbent.
+    agent_path = os.environ.get(
+        "METER_LAYER_AGENT", os.path.join(PROJECT_ROOT, "opponents", "v0_3_1.py")
     )
+    spec = importlib.util.spec_from_file_location("main_agent_meter", agent_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

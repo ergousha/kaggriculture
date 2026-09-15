@@ -69,7 +69,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--top", type=int, default=12, help="how many top teams to spy")
     ap.add_argument("--per-team", type=int, default=6, help="recent episodes per team")
-    ap.add_argument("--fingerprint-only", action="store_true", help="re-mine already-downloaded replays")
+    ap.add_argument(
+        "--fingerprint-only", action="store_true", help="re-mine already-downloaded replays"
+    )
     args = ap.parse_args()
 
     os.makedirs(SPIES_DIR, exist_ok=True)
@@ -81,11 +83,14 @@ def main():
         research = json.load(f)
 
     # team name -> rank/score from the research run
-    teams = [(r["Rank"], r["TeamName"], r["Score"], r["TeamId"]) for r in research["results"][: args.top]]
+    teams = [
+        (r["Rank"], r["TeamName"], r["Score"], r["TeamId"]) for r in research["results"][: args.top]
+    ]
 
     # Reuse the daily miner for parsing; import after path setup.
     import mine_daily as md  # noqa: TID252 - scripts share a repo root
     from examine_agent import download_replay
+
     from submit import load_credentials
 
     load_credentials()
@@ -122,11 +127,7 @@ def main():
 
         # download the replays we don't have yet
         have = {f for f in os.listdir(SPIES_DIR) if f.endswith(".json")}
-        todo = [
-            eid
-            for eid in wanted
-            if f"episode-{eid}-replay.json" not in have
-        ]
+        todo = [eid for eid in wanted if f"episode-{eid}-replay.json" not in have]
         print(f"\ndownloading {len(todo)} replays...")
         for i, eid in enumerate(sorted(todo)):
             print(f"  {i + 1}/{len(todo)} ep {eid} ({wanted[eid]['team']})")
@@ -183,13 +184,35 @@ def main():
     df = pd.DataFrame(rows)
     print("\n=== top-team seat behaviour (mean per seat) ===")
     cols = [
-        "cash", "won", "hires", "land_buys", "owned_tiles", "hands",
-        "rev_WHEAT", "rev_STRAWBERRY", "rev_MELON", "rev_MILK", "rev_WOOL",
-        "rev_TOMATO", "rev_CARROT", "rev_EGG", "rev_FERTILIZER",
-        "sold_WHEAT", "sold_STRAWBERRY", "sold_MELON", "sold_MILK", "sold_WOOL",
-        "sold_TOMATO", "sold_CARROT", "sold_EGG",
-        "animal_SHEEP", "animal_COW", "animal_GOOSE",
-        "ops_productive", "unsold_shed_units", "fertilized_tiles",
+        "cash",
+        "won",
+        "hires",
+        "land_buys",
+        "owned_tiles",
+        "hands",
+        "rev_WHEAT",
+        "rev_STRAWBERRY",
+        "rev_MELON",
+        "rev_MILK",
+        "rev_WOOL",
+        "rev_TOMATO",
+        "rev_CARROT",
+        "rev_EGG",
+        "rev_FERTILIZER",
+        "sold_WHEAT",
+        "sold_STRAWBERRY",
+        "sold_MELON",
+        "sold_MILK",
+        "sold_WOOL",
+        "sold_TOMATO",
+        "sold_CARROT",
+        "sold_EGG",
+        "animal_SHEEP",
+        "animal_COW",
+        "animal_GOOSE",
+        "ops_productive",
+        "unsold_shed_units",
+        "fertilized_tiles",
     ]
     have_cols = [c for c in cols if c in df.columns]
     grouped = df.groupby("spy_team")[have_cols].mean().sort_values("cash", ascending=False)

@@ -13,8 +13,6 @@ questions from docs/proposal-2026-09-14-endgame.md:
 
 from __future__ import annotations
 
-import sys
-
 import pandas as pd
 
 CSV = "logs/daily_fingerprints.csv"
@@ -32,16 +30,39 @@ def main() -> None:
     print(sep["cash"].describe(percentiles=[0.1, 0.25, 0.5, 0.75, 0.9, 0.99]).round(0).to_string())
 
     top = sep[sep["cash"] >= sep["cash"].quantile(0.9)]
-    mid = sep[(sep["cash"] >= sep["cash"].quantile(0.4)) & (sep["cash"] < sep["cash"].quantile(0.6))]
+    mid = sep[
+        (sep["cash"] >= sep["cash"].quantile(0.4)) & (sep["cash"] < sep["cash"].quantile(0.6))
+    ]
 
     cols = [
-        "hires", "land_buys", "owned_tiles", "hands", "ops_productive",
-        "rev_WHEAT", "rev_STRAWBERRY", "rev_MELON", "rev_MILK", "rev_WOOL",
-        "rev_TOMATO", "rev_EGG", "rev_CARROT", "rev_FERTILIZER",
-        "sold_WHEAT", "sold_STRAWBERRY", "sold_TOMATO", "sold_EGG", "sold_MELON",
-        "animal_SHEEP", "animal_COW", "animal_GOOSE",
-        "fertilized_tiles", "unsold_shed_units",
-        "price_STRAWBERRY_end", "price_WOOL_end", "price_MILK_end", "price_MELON_end",
+        "hires",
+        "land_buys",
+        "owned_tiles",
+        "hands",
+        "ops_productive",
+        "rev_WHEAT",
+        "rev_STRAWBERRY",
+        "rev_MELON",
+        "rev_MILK",
+        "rev_WOOL",
+        "rev_TOMATO",
+        "rev_EGG",
+        "rev_CARROT",
+        "rev_FERTILIZER",
+        "sold_WHEAT",
+        "sold_STRAWBERRY",
+        "sold_TOMATO",
+        "sold_EGG",
+        "sold_MELON",
+        "animal_SHEEP",
+        "animal_COW",
+        "animal_GOOSE",
+        "fertilized_tiles",
+        "unsold_shed_units",
+        "price_STRAWBERRY_end",
+        "price_WOOL_end",
+        "price_MILK_end",
+        "price_MELON_end",
     ]
     have = [c for c in cols if c in sep.columns]
     cmp = pd.DataFrame({"top10%": top[have].mean(), "mid": mid[have].mean()})
@@ -83,4 +104,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

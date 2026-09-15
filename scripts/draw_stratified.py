@@ -93,16 +93,16 @@ def main() -> None:
     for draw, rows in sorted(by_draw.items(), key=lambda kv: -len(kv[1])):
         w = sum(r["win"] for r in rows)
         t = sum(r["tie"] for r in rows)
-        l = len(rows) - w - t
+        losses = len(rows) - w - t
         delta = sum(r["me"] - r["opp"] for r in rows) / len(rows)
-        print(f"{draw:<38} {len(rows):>3} {w:>3} {t:>3} {l:>3} {delta:>+9,.0f}")
+        print(f"{draw:<38} {len(rows):>3} {w:>3} {t:>3} {losses:>3} {delta:>+9,.0f}")
 
     def summarize(label: str, rows: list[dict]) -> None:
         w = sum(r["win"] for r in rows)
         t = sum(r["tie"] for r in rows)
-        l = len(rows) - w - t
+        losses = len(rows) - w - t
         delta = sum(r["me"] - r["opp"] for r in rows) / max(1, len(rows))
-        print(f"{label:<38} {len(rows):>3} {w:>3} {t:>3} {l:>3} {delta:>+9,.0f}")
+        print(f"{label:<38} {len(rows):>3} {w:>3} {t:>3} {losses:>3} {delta:>+9,.0f}")
 
     print()
     summarize("ALL", per_seed)

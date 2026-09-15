@@ -165,11 +165,23 @@ def load_seed(candidates_path: str | None = None) -> list[dict]:
     not, we trust the pool and say so — a drift between the baked artifact and
     the mined trace is exactly the kind of thing that silently poisons a search.
     """
-    import main as main_module
-
     # v0.4.0+ ships the multi-route chassis (``_ROUTES``). The search seeds
-    # from the base tape (route 0).
-    seed = main_module._ROUTES[0]
+    # from the base tape (route 0), or from ROUTE_SEARCH_SEED_FILE when the
+    # caller pins a different artifact (e.g. the retired v0.3.1 incumbent for
+    # hash-continuity in tests).
+    seed_file = os.environ.get("ROUTE_SEARCH_SEED_FILE")
+    if seed_file:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("seed_agent", seed_file)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        seed = mod._ROUTE
+    else:
+        import main as main_module
+
+        seed = main_module._ROUTES[0]
     seed_hash = _hash_of(seed)
     if candidates_path and os.path.exists(candidates_path):
         for cand in common.read_jsonl(candidates_path):

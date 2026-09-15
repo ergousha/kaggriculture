@@ -33,9 +33,13 @@ MAX_MARKET_ORDERS = 10  # configuration.maxMarketOrdersPerTurn
 
 
 def _load_agent() -> Any:
-    spec = importlib.util.spec_from_file_location(
-        "main_agent", os.path.join(PROJECT_ROOT, "main.py")
+    # v0.4.x main.py is the multi-route public chassis (no `_ROUTE`/`_METER_*`
+    # module contract); these tests target the last route-replay agent that
+    # shipped the sell/metering layers -- the v0.3.1 incumbent snapshot.
+    agent_path = os.environ.get(
+        "SELL_LAYER_AGENT", os.path.join(PROJECT_ROOT, "opponents", "v0_3_1.py")
     )
+    spec = importlib.util.spec_from_file_location("main_agent", agent_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

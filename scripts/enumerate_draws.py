@@ -56,11 +56,17 @@ def main() -> None:
     args = ap.parse_args()
 
     rows = []
-    pairs = Counter()
+    pairs: Counter[tuple[str, ...]] = Counter()
     for i in range(args.count):
         seed = args.start + i
         pair = tuple(draw_of_seed(seed))
-        rows.append({"seed": seed, "shop1": pair[0] if len(pair) > 0 else "", "shop2": pair[1] if len(pair) > 1 else ""})
+        rows.append(
+            {
+                "seed": seed,
+                "shop1": pair[0] if len(pair) > 0 else "",
+                "shop2": pair[1] if len(pair) > 1 else "",
+            }
+        )
         pairs[pair] += 1
         if (i + 1) % 25 == 0:
             print(f"  {i + 1}/{args.count} seeds done")

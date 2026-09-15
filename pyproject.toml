@@ -37,6 +37,7 @@ extend-exclude = [
     # published/submitted artifacts -- do not reformat.
     "main.py",
     "opponents/v0_4_0.py",
+    "opponents/v0_4_1.py",
     "docs/kaggriculture_metacounter_r1_scored_agent.py",
     "docs/farming-score-v4-a-better-shop.ipynb",
     "docs/kaggriculture-v41-review-candidate.ipynb",
@@ -67,15 +68,24 @@ warn_unused_configs = true
 ignore_missing_imports = true
 disallow_untyped_defs = false
 check_untyped_defs = false
-# Vendored third-party chassis (Apache-2.0, attributed in the file header):
-# byte-identical to the submitted v0.4.0 artifact. The deliberate
+# Vendored third-party chassis (Apache-2.0, attributed in the file headers):
+# byte-identical to the submitted artifacts. The deliberate
 # ``agent = globals().pop('agent')`` layer-chain idiom trips no-redef, and the
-# public source is untyped -- do not "fix" a proven, submitted artifact.
+# public sources are untyped -- do not "fix" a proven, submitted artifact.
 # ``ignore_errors`` (not ``exclude``) because qa.yml lists main.py explicitly.
+# logs/ is excluded because its generated agents collide on module names
+# (the same route hash is mined into two trees).
 exclude = [
     '^main\.py$',
     '^opponents/v0_4_0\.py$',
+    '^opponents/v0_4_1\.py$',
     '^docs/kaggressur_metacounter_r1_scored_agent\.py$',
+    '^logs/',
+    # reference/ladder/ and opponents/ladder/ carry the same vendored ladder files
+    # (MIT, Rayk Kretzschmar) with colliding module names.
+    '^reference/',
+    # scratch/public_kernels/ mirrors the docs/ vendored kernels (working copies).
+    '^scratch/',
 ]
 
 [[tool.mypy.overrides]]
