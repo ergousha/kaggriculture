@@ -199,7 +199,9 @@ def main(argv: list[str] | None = None) -> int:
 
     import main as main_module
 
-    route = main_module._ROUTE
+    # v0.4.0+ ships the multi-route chassis (``_ROUTES``). The schedule tool
+    # is route-shaped, so use the base tape (route 0).
+    route = main_module._ROUTES[0]
     c = census(route)
     print(f"  route {c['steps']} steps")
     print(f"  {'order':<22} {'count':>6} {'units':>7}")

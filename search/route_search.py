@@ -167,7 +167,9 @@ def load_seed(candidates_path: str | None = None) -> list[dict]:
     """
     import main as main_module
 
-    seed = main_module._ROUTE
+    # v0.4.0+ ships the multi-route chassis (``_ROUTES``). The search seeds
+    # from the base tape (route 0).
+    seed = main_module._ROUTES[0]
     seed_hash = _hash_of(seed)
     if candidates_path and os.path.exists(candidates_path):
         for cand in common.read_jsonl(candidates_path):
