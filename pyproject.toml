@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "kaggle>=1.6.14",
     "kaggle-environments>=1.32.6",
+    "kagglehub>=1.0.2",
     "numpy>=2.0.0",
 ]
 
@@ -28,7 +29,18 @@ target-version = "py312"
 # Vendored third-party code: Rayk Kretzschmar's reference ladder (MIT, see
 # opponents/ladder/LICENSE and NOTICE). Kept byte-identical to the published
 # dataset so a ranking result is reproducible against it -- do not reformat.
-extend-exclude = ["opponents/ladder"]
+extend-exclude = [
+    "opponents/ladder",
+    # Vendored third-party chassis (Apache-2.0, attributed in file headers):
+    # the v0.4.0 promoted chassis, its frozen snapshot, and the three public
+    # kernel sources kept for reference/provenance. Byte-identical to the
+    # published/submitted artifacts -- do not reformat.
+    "main.py",
+    "opponents/v0_4_0.py",
+    "docs/kaggriculture_metacounter_r1_scored_agent.py",
+    "docs/farming-score-v4-a-better-shop.ipynb",
+    "docs/kaggriculture-v41-review-candidate.ipynb",
+]
 
 [tool.ruff.lint]
 select = [
@@ -55,6 +67,20 @@ warn_unused_configs = true
 ignore_missing_imports = true
 disallow_untyped_defs = false
 check_untyped_defs = false
+# Vendored third-party chassis (Apache-2.0, attributed in the file header):
+# byte-identical to the submitted v0.4.0 artifact. The deliberate
+# ``agent = globals().pop('agent')`` layer-chain idiom trips no-redef, and the
+# public source is untyped -- do not "fix" a proven, submitted artifact.
+# ``ignore_errors`` (not ``exclude``) because qa.yml lists main.py explicitly.
+exclude = [
+    '^main\.py$',
+    '^opponents/v0_4_0\.py$',
+    '^docs/kaggressur_metacounter_r1_scored_agent\.py$',
+]
+
+[[tool.mypy.overrides]]
+module = ["main"]
+ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = [
