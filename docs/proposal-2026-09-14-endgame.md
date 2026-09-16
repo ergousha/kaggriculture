@@ -42,7 +42,20 @@
 > EXP240's static pair→route table with per-draw measured best (the draw table now exists:
 > `logs/seed_draws.csv`); (c) Phase-3 midgame reset stays as described, now over a portfolio
 > that actually differs per draw.
-
+> ## 📡 LIVE READ — 2026-09-16 (the v0.4.1 watch, answered)
+>
+> All three chassis submissions have enough episodes to read (last-quartile WR via
+> `scripts/calculate_converged_winrate.py`): v0.4.0 **29.4%** (9W-23L-2T, n=34 of 134
+> eps), v0.4.1 re-release **30.8%** (12W-27L-0T, n=39 of 156), v0.4.2 **37.5%**
+> (12W-21L-3T, n=36 of 141) — CIs overlap heavily, and v0.4.2 is a byte-identical
+> agent to v0.4.1 (version bump + engine 1.32.7 pin only), so the 7-point spread
+> between them is a direct measurement of the noise floor. **Verdict: the EXP240
+> graft was live-neutral — it completed chassis-class parity per draw (its premise),
+> it did not exceed the class.** Peer-vs-peer games are coin flips again. Team:
+> rank 609/9202 at 2590.0 (max-active = v0.4.0's decayed 2632.3); v0.4.1/v0.4.2 sit
+> ~2500 and are still climbing. The top-10 churned overnight (DSM, M & M & P & Q,
+> ymg_aq, Sida Zuo are new vs the 09-15 snapshot) — the meta is still moving.
+> Next-version plan: `docs/proposal-2026-09-16-v043.md` (measured per-draw routing).
 > ## ⚡ REVISED PLAN — 2026-09-14, later the same day (supersedes Phases 0–3 below)
 >
 > Phase 1's decision gate has been **answered, and the answer kills Phases 0 and 2 as written.**

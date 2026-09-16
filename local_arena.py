@@ -46,6 +46,9 @@ LOG_DIR = os.path.join(HERE, "logs")
 
 BUILTIN = {"baseline": "starter", "random": "random", "pass": "pass"}
 DEFAULT_STEPS = 720
+# Step 144 is the first observation whose `town.unlocked_shops` carries both
+# day-6 shops; the engine applies the day-5 unlock at the end of day 5.
+SWITCH_OBS_STEP = 144
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +344,19 @@ def run_episode(job: dict) -> dict:
         err = f"{type(exc).__name__}: {exc}"
     wall = time.perf_counter() - t0
 
+    # The day-6 pair actually observed in THIS episode (step 144 is the first
+    # observation that carries it; weed RNG divergence means it must be read
+    # from the episode, never assumed from any seed->draw table). Used by the
+    # v0.4.3 per-draw panel for per-cell attribution.
+    observed_pair = None
+    try:
+        obs144 = env.steps[min(SWITCH_OBS_STEP, len(env.steps) - 1)][0]["observation"]
+        shops = (obs144.get("town") or {}).get("unlocked_shops") or []
+        if len(shops) >= 2:
+            observed_pair = (shops[0], shops[1])
+    except Exception:
+        observed_pair = None
+
     final = env.steps[-1]
     rewards = [s.reward for s in final]
     me = rewards[me_index] if rewards[me_index] is not None else 0.0
@@ -388,6 +404,7 @@ def run_episode(job: dict) -> dict:
         "opp_cash": float(them),
         "win": 1 if me > them else 0,
         "tie": 1 if me == them else 0,
+        "observed_pair": observed_pair,
         "crashes": crashes,
         "timeouts": timeouts,
         "invalid": invalid,

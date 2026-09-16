@@ -39,6 +39,7 @@ extend-exclude = [
     "opponents/v0_4_0.py",
     "opponents/v0_4_1.py",
     "opponents/v0_4_2.py",
+    "opponents/v0_4_3.py",
     "docs/kaggriculture_metacounter_r1_scored_agent.py",
     "docs/farming-score-v4-a-better-shop.ipynb",
     "docs/kaggriculture-v41-review-candidate.ipynb",
@@ -81,6 +82,7 @@ exclude = [
     '^opponents/v0_4_0\.py$',
     '^opponents/v0_4_1\.py$',
     '^opponents/v0_4_2\.py$',
+    '^opponents/v0_4_3\.py$',
     '^docs/kaggressur_metacounter_r1_scored_agent\.py$',
     '^logs/',
     # reference/ladder/ and opponents/ladder/ carry the same vendored ladder files
