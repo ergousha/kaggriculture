@@ -72,7 +72,7 @@ print(
 )
 for route in sorted(by):
     rs = by[route]
-    d = [r["me_cash"] - r["opp_cash"] for r in rs]
+    deltas = [r["me_cash"] - r["opp_cash"] for r in rs]
     yarn = [
         r["me_cash"] - r["opp_cash"]
         for r in rs
@@ -89,7 +89,7 @@ for route in sorted(by):
     note = "ANCHOR (must be all-tie)" if route == ANCHOR else ""
     print(
         f"{route:>6} {len(rs):>4} {w:>3} {t:>3} {losses:>3} "
-        f"{statistics.fmean(d):>+9,.0f} "
+        f"{statistics.fmean(deltas):>+9,.0f} "
         f"{statistics.fmean(yarn) if yarn else 0:>+9,.0f} "
         f"{statistics.fmean(nony) if nony else 0:>+9,.0f}  {note}"
     )

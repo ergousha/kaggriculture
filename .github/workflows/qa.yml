@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# A push to an open PR's branch supersedes the previous run; queueing both wastes a
+# runner and reports a stale verdict on the PR.
+concurrency:
+  group: qa-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   qa:
     name: Quality Assurance
@@ -26,9 +32,14 @@ jobs:
           enable-cache: true
           python-version: "3.13"
 
+      # --frozen: resolve from uv.lock exactly, never update it. README: "The engine
+      # version is load-bearing: the same game on the same seed pays out completely
+      # differently across releases." A CI run that silently resolved a different
+      # kaggle-environments would invalidate every measurement it then reported as a
+      # gate. Fail on a stale lockfile instead.
       - name: Install dependencies
         run: |
-          uv sync --dev
+          uv sync --dev --frozen
 
       - name: Run Ruff Linter
         run: |
@@ -38,11 +49,15 @@ jobs:
         run: |
           uv run ruff format --check .
 
+      # scripts/ was absent from this list until 2026-09-21. That is how
+      # scripts/compare_routes.py and scripts/analyse_movement.py went on referencing
+      # main._ROUTE for a week after the v0.4.0 chassis pivot renamed it to _ROUTES --
+      # both raise AttributeError on import. Keep scripts/ here.
       - name: Run Mypy Type Check
         run: |
           uv run mypy submit.py main.py local_arena.py \
             mine_replays.py simulate_candidates.py rank_cvar.py encode_submission.py \
-            mining/ tests/ search/
+            mining/ tests/ search/ scripts/
 
       - name: Run Test Suite
         run: |
