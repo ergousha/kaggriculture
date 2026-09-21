@@ -67,6 +67,10 @@ known-first-party = ["main", "local_arena", "submit", "search"]
 
 [tool.mypy]
 python_version = "3.12"
+# scripts/ is a flat directory whose members import each other by top-level name after a
+# sys.path insert. Without this, mypy maps scripts/v043_common.py to BOTH "v043_common"
+# and "scripts.v043_common" and refuses to check the directory at all.
+explicit_package_bases = true
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
@@ -96,6 +100,37 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = ["main"]
+ignore_errors = true
+
+# Pre-existing scripts, ignored so that scripts/ can be type-checked at all rather than
+# left out entirely (it was, until 2026-09-21, which is how the two breakages below went
+# unnoticed). These are NOT clean and should not be assumed working:
+#
+#   compare_routes, analyse_movement -- reference `main._ROUTE`, which has not existed
+#     since the v0.4.0 chassis pivot; main.py defines `_ROUTES`. Both raise
+#     AttributeError on import. They analyse the retired single-route line, so they are
+#     left broken-and-flagged rather than guessed at.
+#   v043_common, v043_panel, v043_fills -- produced the measurements v0.4.3 and v0.5.1
+#     ship. Byte-for-byte reproducibility of those numbers outranks a type annotation;
+#     do not refactor them to satisfy mypy.
+#
+# Anything ADDED to scripts/ from here on must type-check. Do not extend this list to
+# make a new script pass.
+[[tool.mypy.overrides]]
+# Both spellings: mypy names these "scripts.x" when the directory is passed on the
+# command line and "x" when another script imports them by top-level name.
+module = [
+    "compare_routes",
+    "analyse_movement",
+    "v043_common",
+    "v043_panel",
+    "v043_fills",
+    "scripts.compare_routes",
+    "scripts.analyse_movement",
+    "scripts.v043_common",
+    "scripts.v043_panel",
+    "scripts.v043_fills",
+]
 ignore_errors = true
 
 [[tool.mypy.overrides]]

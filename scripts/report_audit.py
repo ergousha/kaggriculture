@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent.parent
 claims = json.loads((HERE / "logs" / "claims_sidecar.json").read_text())["claims"]
 
 
-def load(v: str) -> dict:
+def load(v: str) -> tuple[dict, dict]:
     raw = json.loads((HERE / "logs" / f"jev_audit_raw_{v}.json").read_text())
     out: dict[str, dict] = {}
     for r in raw["requests"].values():

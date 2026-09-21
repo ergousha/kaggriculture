@@ -104,12 +104,12 @@ def wire_questions(claim_ids: list[str], claims: dict, terse: bool) -> dict:
             f"settle whether claim {cid} is still accurate?",
             "criteria": dict.fromkeys(ARTIFACTS),
         }
-        q_measured = {
+        q_measured: dict[str, object] = {
             "type": "noul",
             "instructions": f"Claim {cid} asserts a specific measured result about "
             f"this agent's performance or about the game engine.",
         }
-        q_retired = {
+        q_retired: dict[str, object] = {
             "type": "noul",
             "instructions": f"The text of claim {cid} says the finding it describes "
             f"has been superseded, was wrong, or has been contradicted.",
@@ -131,7 +131,7 @@ def wire_questions(claim_ids: list[str], claims: dict, terse: bool) -> dict:
         qs[f"retired_{cid}"] = q_retired
 
         if claims[cid]["kind"] == "conclusion":
-            q_self = {
+            q_self: dict[str, object] = {
                 "type": "noul",
                 "instructions": f"The conclusion stated in claim {cid} is supported by "
                 f"evidence given inside that same claim.",
@@ -261,13 +261,15 @@ def main() -> None:
     if args.dump_request is not None:
         reqs = pack(all_ids, claims, args.terse)
         ids = reqs[args.dump_request]
-        body = {
+        body: dict[str, object] = {
             "model": "jev-1.13.0",
             "state": state_for(ids, claims, args.terse),
             "questions": wire_questions(ids, claims, args.terse),
         }
-        body["state"]["claims"] = body["state"]["claims"][:500] + "\n...[truncated]"
-        body["questions"] = dict(list(body["questions"].items())[:4])
+        shown_state = dict(state_for(ids, claims, args.terse))
+        shown_state["claims"] = str(shown_state["claims"])[:500] + "\n...[truncated]"
+        body["state"] = shown_state
+        body["questions"] = dict(list(wire_questions(ids, claims, args.terse).items())[:4])
         print("\n--- request body (claims and questions truncated) ---")
         print(json.dumps(body, indent=2))
 

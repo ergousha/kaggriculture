@@ -71,8 +71,10 @@ def fetch_submissions() -> list[dict]:
     if token:
         os.environ["KAGGLE_API_TOKEN"] = token
     else:
-        os.environ["KAGGLE_USERNAME"] = kc.KAGGLE_USERNAME
-        os.environ["KAGGLE_KEY"] = kc.KAGGLE_KEY
+        # getattr, not attribute access: kaggle_credentials.py is gitignored, so it
+        # is absent in CI and its attributes cannot be resolved statically.
+        os.environ["KAGGLE_USERNAME"] = str(getattr(kc, "KAGGLE_USERNAME", ""))
+        os.environ["KAGGLE_KEY"] = str(getattr(kc, "KAGGLE_KEY", ""))
     from kaggle.api.kaggle_api_extended import KaggleApi  # noqa: WPS433
 
     api = KaggleApi()
