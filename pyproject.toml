@@ -41,6 +41,7 @@ extend-exclude = [
     "opponents/v0_4_1.py",
     "opponents/v0_4_2.py",
     "opponents/v0_4_3.py",
+    "opponents/v0_5_0.py",
     "docs/kaggriculture_metacounter_r1_scored_agent.py",
     "docs/farming-score-v4-a-better-shop.ipynb",
     "docs/kaggriculture-v41-review-candidate.ipynb",

@@ -53,9 +53,12 @@ for q in ("measured", "retired", "self_supported"):
     mad = stats.mean(abs(a - b) for a, b in pairs)
     # agreement at the cookbook's own suggested band
     agree = sum((a >= 0.5) == (b >= 0.5) for a, b in pairs) / len(pairs)
-    flip = [(c, noul(T, f"{q}_{c}"), noul(F, f"{q}_{c}")) for c in ids
-            if noul(T, f"{q}_{c}") is not None
-            and (noul(T, f"{q}_{c}") >= 0.5) != (noul(F, f"{q}_{c}") >= 0.5)]
+    flip = [
+        (c, noul(T, f"{q}_{c}"), noul(F, f"{q}_{c}"))
+        for c in ids
+        if noul(T, f"{q}_{c}") is not None
+        and (noul(T, f"{q}_{c}") >= 0.5) != (noul(F, f"{q}_{c}") >= 0.5)
+    ]
     print(f"\n{q:<16} n={len(pairs)}")
     print(f"  mean noul       terse {stats.mean(ta):.3f}   full {stats.mean(fa):.3f}")
     print(f"  mean abs diff   {mad:.3f}")
@@ -69,13 +72,17 @@ print(f"  same top pick   {sum(a == b for a, b in ca) / len(ca) * 100:.1f}%")
 rule("2. `measured` noul vs the corpus's own numeric/conclusion label")
 for kind in ("numeric", "conclusion"):
     vals = [noul(T, f"measured_{c}") for c in ids if claims[c]["kind"] == kind]
-    print(f"  kind={kind:<11} n={len(vals):>3}  mean noul {stats.mean(vals):.3f}  "
-          f"median {stats.median(vals):.3f}  >=0.5: "
-          f"{sum(v >= 0.5 for v in vals) / len(vals) * 100:.0f}%")
+    print(
+        f"  kind={kind:<11} n={len(vals):>3}  mean noul {stats.mean(vals):.3f}  "
+        f"median {stats.median(vals):.3f}  >=0.5: "
+        f"{sum(v >= 0.5 for v in vals) / len(vals) * 100:.0f}%"
+    )
 print("\n  numeric claims Jev says are NOT measured (noul < 0.2) -- masked values but")
 print("  no measured result asserted:")
-low = sorted(((noul(T, f"measured_{c}"), c) for c in ids
-              if claims[c]["kind"] == "numeric"), key=lambda x: x[0])[:5]
+low = sorted(
+    ((noul(T, f"measured_{c}"), c) for c in ids if claims[c]["kind"] == "numeric"),
+    key=lambda x: x[0],
+)[:5]
 for v, c in low:
     print(f"    {c} {v:.2f}  {claims[c]['file']}:{claims[c]['line']}")
     print(f"           {claims[c]['text'][:105]}")
@@ -84,22 +91,28 @@ for v, c in low:
 rule("3. `retired` noul vs the corpus builder's regex/section stale flag")
 flagged = [c for c in ids if claims[c]["self_marked_stale"]]
 unflagged = [c for c in ids if not claims[c]["self_marked_stale"]]
-print(f"  regex-flagged   n={len(flagged):>3}  mean noul "
-      f"{stats.mean(noul(T, f'retired_{c}') for c in flagged):.3f}")
-print(f"  not flagged     n={len(unflagged):>3}  mean noul "
-      f"{stats.mean(noul(T, f'retired_{c}') for c in unflagged):.3f}")
+print(
+    f"  regex-flagged   n={len(flagged):>3}  mean noul "
+    f"{stats.mean(noul(T, f'retired_{c}') for c in flagged):.3f}"
+)
+print(
+    f"  not flagged     n={len(unflagged):>3}  mean noul "
+    f"{stats.mean(noul(T, f'retired_{c}') for c in unflagged):.3f}"
+)
 for thr in (0.9, 0.8, 0.5):
     hits = [c for c in unflagged if noul(T, f"retired_{c}") >= thr]
     print(f"  unflagged claims with retired >= {thr}: {len(hits)}")
 print("\n  TOP CANDIDATES the regex missed (both variants agree >= 0.8):")
 cands = sorted(
-    (c for c in unflagged
-     if noul(T, f"retired_{c}") >= 0.8 and noul(F, f"retired_{c}") >= 0.8),
-    key=lambda c: -noul(T, f"retired_{c}"))
+    (c for c in unflagged if noul(T, f"retired_{c}") >= 0.8 and noul(F, f"retired_{c}") >= 0.8),
+    key=lambda c: -noul(T, f"retired_{c}"),
+)
 for c in cands[:12]:
     k = claims[c]
-    print(f"    {c} T={noul(T, f'retired_{c}'):.2f} F={noul(F, f'retired_{c}'):.2f}  "
-          f"{k['file']}:{k['line']}")
+    print(
+        f"    {c} T={noul(T, f'retired_{c}'):.2f} F={noul(F, f'retired_{c}'):.2f}  "
+        f"{k['file']}:{k['line']}"
+    )
     print(f"           {k['text'][:110]}")
 print(f"\n  total agreed candidates: {len(cands)}")
 
@@ -107,23 +120,30 @@ print(f"\n  total agreed candidates: {len(cands)}")
 rule("4. artifact routing")
 picks = Counter(T[f"artifact_{c}"]["choice"] for c in ids)
 for name, n in picks.most_common():
-    conf = stats.mean(T[f"artifact_{c}"]["confidence"] for c in ids
-                      if T[f"artifact_{c}"]["choice"] == name)
+    conf = stats.mean(
+        T[f"artifact_{c}"]["confidence"] for c in ids if T[f"artifact_{c}"]["choice"] == name
+    )
     print(f"  {name:<24} {n:>4}  ({n / len(ids) * 100:>4.1f}%)  mean confidence {conf:.2f}")
 nc = [c for c in ids if T[f"artifact_{c}"]["choice"] == "not_checkable"]
-print("\n  not_checkable share by claim kind: " + ", ".join(
-    f"{k}={sum(1 for c in nc if claims[c]['kind'] == k)}/"
-    f"{sum(1 for c in ids if claims[c]['kind'] == k)}"
-    for k in ("numeric", "conclusion")))
+print(
+    "\n  not_checkable share by claim kind: "
+    + ", ".join(
+        f"{k}={sum(1 for c in nc if claims[c]['kind'] == k)}/"
+        f"{sum(1 for c in ids if claims[c]['kind'] == k)}"
+        for k in ("numeric", "conclusion")
+    )
+)
 
 # ----------------------------------------------------------- 5. self_supported
 rule("5. `self_supported` on conclusion claims")
-vals = [(noul(T, f"self_supported_{c}"), c) for c in ids
-        if noul(T, f"self_supported_{c}") is not None]
-print(f"  n={len(vals)}  mean {stats.mean(v for v, _ in vals):.3f}  "
-      f"median {stats.median(v for v, _ in vals):.3f}")
-print(f"  < 0.2 (conclusion with no evidence in the claim): "
-      f"{sum(v < 0.2 for v, _ in vals)}")
+vals = [
+    (noul(T, f"self_supported_{c}"), c) for c in ids if noul(T, f"self_supported_{c}") is not None
+]
+print(
+    f"  n={len(vals)}  mean {stats.mean(v for v, _ in vals):.3f}  "
+    f"median {stats.median(v for v, _ in vals):.3f}"
+)
+print(f"  < 0.2 (conclusion with no evidence in the claim): {sum(v < 0.2 for v, _ in vals)}")
 print("\n  weakest -- conclusions asserted without their evidence:")
 for v, c in sorted(vals)[:6]:
     print(f"    {c} {v:.2f}  {claims[c]['file']}:{claims[c]['line']}")

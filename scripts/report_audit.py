@@ -61,24 +61,30 @@ def cite(c: str) -> str:
 
 
 print("# Claim audit — research record\n")
-tot_in = sum(r["input_tokens"] for r in list(rawT["requests"].values())
-             + list(rawF["requests"].values()))
-lat = [r["latency_s"] for r in list(rawT["requests"].values())
-       + list(rawF["requests"].values())]
-print(f"Model `{list(rawT['requests'].values())[0]['model']}`, "
-      f"{len(claims)} claims, both criteria variants. "
-      f"{tot_in:,} input tokens, **${tot_in / 1e9 * 42:.4f}** total, "
-      f"{sum(lat):.1f}s of API time.\n")
-print("Every finding below is agreed by BOTH variants. Single-variant verdicts are "
-      "withheld: the terse/full comparison measured only 61% agreement on "
-      "`self_supported`, so one variant alone is not stable enough to act on.\n")
+tot_in = sum(
+    r["input_tokens"] for r in list(rawT["requests"].values()) + list(rawF["requests"].values())
+)
+lat = [r["latency_s"] for r in list(rawT["requests"].values()) + list(rawF["requests"].values())]
+print(
+    f"Model `{list(rawT['requests'].values())[0]['model']}`, "
+    f"{len(claims)} claims, both criteria variants. "
+    f"{tot_in:,} input tokens, **${tot_in / 1e9 * 42:.4f}** total, "
+    f"{sum(lat):.1f}s of API time.\n"
+)
+print(
+    "Every finding below is agreed by BOTH variants. Single-variant verdicts are "
+    "withheld: the terse/full comparison measured only 61% agreement on "
+    "`self_supported`, so one variant alone is not stable enough to act on.\n"
+)
 
 # ---------------------------------------------------------------- retired
 r = agreed("retired", 0.8)
 missed = [x for x in r if not claims[x[3]]["self_marked_stale"]]
 print(f"## Retired claims the section markers missed ({len(missed)})\n")
-print("Claims that disown a finding in their own text but sit in a section carrying no "
-      "`Superseded` / `wrong` marker. These are the tool's actual yield.\n")
+print(
+    "Claims that disown a finding in their own text but sit in a section carrying no "
+    "`Superseded` / `wrong` marker. These are the tool's actual yield.\n"
+)
 for _lo, t, f, c in missed:
     print(f"- **{cite(c)}** — terse {t:.2f}, full {f:.2f}\n")
     print(f"  > {claims[c]['text'][:260]}\n")
@@ -86,12 +92,13 @@ for _lo, t, f, c in missed:
 # ---------------------------------------------------------------- unsupported
 s = agreed_low("self_supported", 0.2)
 print(f"\n## Conclusions asserted without their evidence ({len(s)})\n")
-print("Low `self_supported` means the claim states a conclusion whose evidence sits "
-      "elsewhere. Not an error — a pointer to prose that cannot be checked where it "
-      "stands, which is the `README.md:1208` failure mode.\n")
+print(
+    "Low `self_supported` means the claim states a conclusion whose evidence sits "
+    "elsewhere. Not an error — a pointer to prose that cannot be checked where it "
+    "stands, which is the `README.md:1208` failure mode.\n"
+)
 for _hi, t, f, c in s[:15]:
-    print(f"- {cite(c)} — terse {t:.2f}, full {f:.2f} — "
-          f"{claims[c]['text'][:150]}")
+    print(f"- {cite(c)} — terse {t:.2f}, full {f:.2f} — {claims[c]['text'][:150]}")
 
 # ---------------------------------------------------------------- routing
 print("\n\n## Numeric claims routed to an artifact, for the Phase 3 comparator\n")
@@ -107,6 +114,8 @@ for c in ids:
     buckets.setdefault(a["choice"], []).append(a["confidence"])
 for name, confs in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
     print(f"| `{name}` | {len(confs)} | {stats.mean(confs):.2f} |")
-print(f"\n{sum(len(v) for k, v in buckets.items() if k != 'not_checkable')} claims "
-      f"have an agreed artifact and an asserted measurement — these are what Phase 3's "
-      f"numeric comparator would check.")
+print(
+    f"\n{sum(len(v) for k, v in buckets.items() if k != 'not_checkable')} claims "
+    f"have an agreed artifact and an asserted measurement — these are what Phase 3's "
+    f"numeric comparator would check."
+)

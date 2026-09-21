@@ -55,7 +55,7 @@ SOURCES = ["README.md", "docs/experiments.md"]
 OUT_CORPUS = HERE / "logs" / "claims_corpus.json"
 OUT_SIDECAR = HERE / "logs" / "claims_sidecar.json"
 
-CHOICE_MAX = 255          # model's hard cap on Choice options
+CHOICE_MAX = 255  # model's hard cap on Choice options
 CHARS_PER_CHUNK = 60_000  # keeps a chunk's state inside the 32k-token state budget
 
 # One single-pass alternation. Order matters and is load-bearing:
@@ -91,8 +91,8 @@ STALE_MARKERS = re.compile(
 
 
 def clean_markdown(s: str) -> str:
-    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)      # links -> label
-    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)            # bold
+    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)  # links -> label
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)  # bold
     s = re.sub(r"(?<!\w)[*_]([^*_]+)[*_](?!\w)", r"\1", s)
     # Leading list/quote markers. Every alternative REQUIRES trailing whitespace:
     # without it `\d+\.` eats the `97.` from a line starting `**97.0%**` (leaving
@@ -128,9 +128,12 @@ def iter_blocks(text: str):
             line_map.append((off, lineno))
             block_parts.append(cleaned)
             off += len(cleaned) + 1  # the joining space
-        out = (line_map, " > ".join(h for _, h in stack),
-               any(STALE_MARKERS.search(h) for _, h in stack),
-               " ".join(block_parts))
+        out = (
+            line_map,
+            " > ".join(h for _, h in stack),
+            any(STALE_MARKERS.search(h) for _, h in stack),
+            " ".join(block_parts),
+        )
         buf = []
         return out
 
@@ -164,9 +167,11 @@ def iter_blocks(text: str):
             stack.append((depth, clean_markdown(hm.group(2))))
             continue
 
-        if (not s_line.strip()
-                or s_line.lstrip().startswith(("|", "![", "<img", "<a ", "---", "==="))
-                or re.match(r"^\s*[\w./-]+\s{2,}#", s_line)):
+        if (
+            not s_line.strip()
+            or s_line.lstrip().startswith(("|", "![", "<img", "<a ", "---", "==="))
+            or re.match(r"^\s*[\w./-]+\s{2,}#", s_line)
+        ):
             out = flush()
             if out:
                 yield out
@@ -215,9 +220,7 @@ def build() -> tuple[dict, dict]:
 
     for src in SOURCES:
         text = (HERE / src).read_text(encoding="utf-8")
-        skipped_table_rows += sum(
-            1 for ln in text.splitlines() if ln.lstrip().startswith("|")
-        )
+        skipped_table_rows += sum(1 for ln in text.splitlines() if ln.lstrip().startswith("|"))
         for line_map, section, stale_sec, block in iter_blocks(text):
             cursor = 0
             for sent in split_sentences(block):
@@ -236,21 +239,21 @@ def build() -> tuple[dict, dict]:
                 if not has_num and not CONCLUSION_WORDS.search(sent):
                     continue
                 masked, values = mask(sent)
-                key = hashlib.sha1(
-                    re.sub(r"\W+", "", masked.lower()).encode()
-                ).hexdigest()[:16]
+                key = hashlib.sha1(re.sub(r"\W+", "", masked.lower()).encode()).hexdigest()[:16]
                 if key in seen:  # same figure restated across the two documents
                     continue
                 seen.add(key)
-                claims.append({
-                    "text": masked,
-                    "values": values,
-                    "file": src,
-                    "line": start,
-                    "section": section,
-                    "self_marked_stale": stale_sec or bool(STALE_MARKERS.search(sent)),
-                    "kind": "numeric" if values else "conclusion",
-                })
+                claims.append(
+                    {
+                        "text": masked,
+                        "values": values,
+                        "file": src,
+                        "line": start,
+                        "section": section,
+                        "self_marked_stale": stale_sec or bool(STALE_MARKERS.search(sent)),
+                        "kind": "numeric" if values else "conclusion",
+                    }
+                )
 
     for n, c in enumerate(claims):
         c["id"] = f"C{n:04d}"
@@ -274,15 +277,19 @@ def build() -> tuple[dict, dict]:
 
     corpus = {
         "note": "measurement numerals are masked as <TYPE:idx>; raw values live in the "
-                "sidecar and are never sent. Versions, dates and small identifiers are "
-                "intentionally left intact as semantic content.",
+        "sidecar and are never sent. Versions, dates and small identifiers are "
+        "intentionally left intact as semantic content.",
         "choice_option_cap": CHOICE_MAX,
         "chunks": chunks,
     }
     sidecar = {
-        "claims": {c["id"]: {k: c[k] for k in (
-            "file", "line", "section", "values", "kind", "self_marked_stale", "text"
-        )} for c in claims},
+        "claims": {
+            c["id"]: {
+                k: c[k]
+                for k in ("file", "line", "section", "values", "kind", "self_marked_stale", "text")
+            }
+            for c in claims
+        },
         "skipped_table_rows": skipped_table_rows,
         "dropped_reflow_fragments": dropped_fragment,
     }
@@ -303,38 +310,51 @@ def main() -> None:
     numeric = sum(1 for c in claims.values() if c["kind"] == "numeric")
 
     print(f"sources           : {', '.join(SOURCES)}")
-    print(f"claims extracted  : {len(claims)}  ({numeric} numeric, "
-          f"{len(claims) - numeric} conclusion)")
-    print(f"self-marked stale : {sum(1 for c in claims.values() if c['self_marked_stale'])}"
-          "   (labelled positives for Phase 5)")
+    print(
+        f"claims extracted  : {len(claims)}  ({numeric} numeric, "
+        f"{len(claims) - numeric} conclusion)"
+    )
+    print(
+        f"self-marked stale : {sum(1 for c in claims.values() if c['self_marked_stale'])}"
+        "   (labelled positives for Phase 5)"
+    )
     print(f"table rows skipped: {sidecar['skipped_table_rows']}")
     print(f"reflow fragments  : {sidecar['dropped_reflow_fragments']} dropped")
-    print(f"chunks            : {len(corpus['chunks'])} (max "
-          f"{max(len(c['claim_ids']) for c in corpus['chunks'])} claims, cap {CHOICE_MAX})")
+    print(
+        f"chunks            : {len(corpus['chunks'])} (max "
+        f"{max(len(c['claim_ids']) for c in corpus['chunks'])} claims, cap {CHOICE_MAX})"
+    )
     print(f"numerals masked   : {sum(len(c['values']) for c in claims.values())}")
     print()
-    print(f"raw prose         : {raw_words:>7} words  ~{raw_tok:>7} tok  "
-          f"${raw_tok / 1e9 * 42:.6f}/pass")
-    print(f"corpus            : {cor_words:>7} words  ~{cor_tok:>7} tok  "
-          f"${cor_tok / 1e9 * 42:.6f}/pass")
-    print(f"reduction         : {(1 - cor_tok / raw_tok) * 100:.1f}% fewer input tokens "
-          f"({raw_tok / cor_tok:.2f}x)")
+    print(
+        f"raw prose         : {raw_words:>7} words  ~{raw_tok:>7} tok  "
+        f"${raw_tok / 1e9 * 42:.6f}/pass"
+    )
+    print(
+        f"corpus            : {cor_words:>7} words  ~{cor_tok:>7} tok  "
+        f"${cor_tok / 1e9 * 42:.6f}/pass"
+    )
+    print(
+        f"reduction         : {(1 - cor_tok / raw_tok) * 100:.1f}% fewer input tokens "
+        f"({raw_tok / cor_tok:.2f}x)"
+    )
 
     if args.sample:
         print(f"\n=== random sample of {args.sample} ===")
         random.seed(7)
         for cid in random.sample(list(claims), args.sample):
             c = claims[cid]
-            print(f"{cid} [{c['kind']:10}] {c['file']}:{c['line']}"
-                  f"{'  STALE' if c['self_marked_stale'] else ''}")
+            print(
+                f"{cid} [{c['kind']:10}] {c['file']}:{c['line']}"
+                f"{'  STALE' if c['self_marked_stale'] else ''}"
+            )
             print(f"      {c['text'][:160]}")
 
     if not args.stats_only:
         OUT_CORPUS.parent.mkdir(parents=True, exist_ok=True)
         OUT_CORPUS.write_text(json.dumps(corpus, indent=2), encoding="utf-8")
         OUT_SIDECAR.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
-        print(f"\nwrote {OUT_CORPUS.relative_to(HERE)} and "
-              f"{OUT_SIDECAR.relative_to(HERE)}")
+        print(f"\nwrote {OUT_CORPUS.relative_to(HERE)} and {OUT_SIDECAR.relative_to(HERE)}")
 
 
 if __name__ == "__main__":
