@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One live Jev call. Confirms auth, records which model answered, prints usage.
 
-    uv run python scripts/jev_smoke.py
+uv run python scripts/jev_smoke.py
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typesafe_sdk import Choice, Noul, NoulCriteria  # noqa: E402
 STATE = {
     "what_this_is": "One masked claim from a Kaggle agent's research notes.",
     "claims": "C9999| The shipped route beat its one evaluation opponent <PCT:0> of "
-              "the time offline and wins <PCT:1> live.",
+    "the time offline and wins <PCT:1> live.",
 }
 
 with cl as c:
@@ -28,22 +28,22 @@ with cl as c:
         {
             "measured_C9999": Noul(
                 instructions="Claim C9999 asserts a specific measured result about "
-                             "this agent's performance or about the game engine.",
+                "this agent's performance or about the game engine.",
                 criteria=NoulCriteria(
                     true="States a result, quantity, rate or outcome that was measured, "
-                         "including where the value is masked as a <TYPE:index> "
-                         "placeholder",
+                    "including where the value is masked as a <TYPE:index> "
+                    "placeholder",
                     false="States a plan, rationale, open question or tooling "
-                          "description, with no measured result",
+                    "description, with no measured result",
                 ),
             ),
             "retired_C9999": Noul(
                 instructions="The text of claim C9999 says the finding it describes has "
-                             "been superseded, was wrong, or has been contradicted.",
+                "been superseded, was wrong, or has been contradicted.",
             ),
             "artifact_C9999": Choice(
                 instructions="Which kind of record would settle whether claim C9999 is "
-                             "still accurate?",
+                "still accurate?",
                 criteria={
                     "offline_match_results": None,
                     "live_leaderboard_results": None,

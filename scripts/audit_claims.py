@@ -42,8 +42,7 @@ def to_sdk(wire: dict) -> dict:
             crit = q.get("criteria")
             out[key] = Noul(
                 instructions=q["instructions"],
-                criteria=NoulCriteria(true=crit["true"], false=crit["false"])
-                if crit else None,
+                criteria=NoulCriteria(true=crit["true"], false=crit["false"]) if crit else None,
             )
     return out
 
@@ -52,12 +51,18 @@ def serialise(answers: dict) -> dict:
     out: dict[str, dict] = {}
     for key, a in answers.items():
         if hasattr(a, "noul"):
-            out[key] = {"type": "noul", "noul": a.noul,
-                        "confidence": getattr(a, "confidence", None)}
+            out[key] = {
+                "type": "noul",
+                "noul": a.noul,
+                "confidence": getattr(a, "confidence", None),
+            }
         else:
-            out[key] = {"type": "choice", "choice": a.choice,
-                        "confidence": a.confidence,
-                        "probabilities": dict(a.probabilities)}
+            out[key] = {
+                "type": "choice",
+                "choice": a.choice,
+                "confidence": a.confidence,
+                "probabilities": dict(a.probabilities),
+            }
     return out
 
 
@@ -75,9 +80,11 @@ def main() -> None:
     reqs = pack(all_ids, claims, terse)
 
     out_path = HERE / "logs" / f"jev_audit_raw_{args.variant}.json"
-    store = json.loads(out_path.read_text()) if out_path.exists() else {
-        "variant": args.variant, "requests": {}
-    }
+    store = (
+        json.loads(out_path.read_text())
+        if out_path.exists()
+        else {"variant": args.variant, "requests": {}}
+    )
 
     targets = [args.only] if args.only is not None else range(len(reqs))
     cl, model = client(timeout=args.timeout)
@@ -89,8 +96,7 @@ def main() -> None:
                 print(f"request {i}: cached, skipping")
                 continue
             qs = to_sdk(wire_questions(ids, claims, terse))
-            print(f"request {i}: {len(ids)} claims, {len(qs)} questions ... ", end="",
-                  flush=True)
+            print(f"request {i}: {len(ids)} claims, {len(qs)} questions ... ", end="", flush=True)
             t0 = time.time()
             r = c.system_one(state_for(ids, claims, terse), qs, model=model)
             dt = time.time() - t0
@@ -107,10 +113,8 @@ def main() -> None:
 
     done = store["requests"]
     tot_in = sum(v["input_tokens"] for v in done.values())
-    print(f"\n{len(done)}/{len(reqs)} requests cached in "
-          f"{out_path.relative_to(HERE)}")
-    print(f"input tokens {tot_in}  ->  ${tot_in / 1e9 * 42:.6f} spent "
-          f"(output free)")
+    print(f"\n{len(done)}/{len(reqs)} requests cached in {out_path.relative_to(HERE)}")
+    print(f"input tokens {tot_in}  ->  ${tot_in / 1e9 * 42:.6f} spent (output free)")
 
 
 if __name__ == "__main__":

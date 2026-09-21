@@ -56,38 +56,54 @@ for c, d in sorted(contaminated.items(), key=lambda kv: -abs(kv[1])):
     print(f"    seed {c[0]} swap={c[1]}  anchor diff ${d:+,.0f}")
 
 clean = [r for r in rows if cell(r) not in contaminated]
-print(f"\nexcluded {len(rows) - len(clean)} episodes across all arms "
-      f"({len(contaminated)} cells x {len(rows) // max(1, len({r['endgame'] for r in rows}))//len({cell(x) for x in rows})if False else len({r['endgame'] for r in rows})} arms)")
+print(
+    f"\nexcluded {len(rows) - len(clean)} episodes across all arms "
+    f"({len(contaminated)} cells x {len(rows) // max(1, len({r['endgame'] for r in rows})) // len({cell(x) for x in rows}) if False else len({r['endgame'] for r in rows})} arms)"
+)
 print(f"clean episodes            : {len(clean)}")
 
 by: dict[int, list] = defaultdict(list)
 for r in clean:
     by[r["endgame"]].append(r)
 
-print(f"\n{'route':>6} {'n':>4} {'W':>3} {'T':>3} {'L':>3} {'Δμ$':>9} "
-      f"{'Δμ yarn':>9} {'Δμ nonY':>9}  note")
+print(
+    f"\n{'route':>6} {'n':>4} {'W':>3} {'T':>3} {'L':>3} {'Δμ$':>9} "
+    f"{'Δμ yarn':>9} {'Δμ nonY':>9}  note"
+)
 for route in sorted(by):
     rs = by[route]
     d = [r["me_cash"] - r["opp_cash"] for r in rs]
-    yarn = [r["me_cash"] - r["opp_cash"] for r in rs
-            if "YARN_STORE" in tuple(r.get("observed_pair") or ())]
-    nony = [r["me_cash"] - r["opp_cash"] for r in rs
-            if "YARN_STORE" not in tuple(r.get("observed_pair") or ())]
+    yarn = [
+        r["me_cash"] - r["opp_cash"]
+        for r in rs
+        if "YARN_STORE" in tuple(r.get("observed_pair") or ())
+    ]
+    nony = [
+        r["me_cash"] - r["opp_cash"]
+        for r in rs
+        if "YARN_STORE" not in tuple(r.get("observed_pair") or ())
+    ]
     w = sum(r["win"] for r in rs)
     t = sum(r["tie"] for r in rs)
     losses = len(rs) - w - t
     note = "ANCHOR (must be all-tie)" if route == ANCHOR else ""
-    print(f"{route:>6} {len(rs):>4} {w:>3} {t:>3} {losses:>3} "
-          f"{statistics.fmean(d):>+9,.0f} "
-          f"{statistics.fmean(yarn) if yarn else 0:>+9,.0f} "
-          f"{statistics.fmean(nony) if nony else 0:>+9,.0f}  {note}")
+    print(
+        f"{route:>6} {len(rs):>4} {w:>3} {t:>3} {losses:>3} "
+        f"{statistics.fmean(d):>+9,.0f} "
+        f"{statistics.fmean(yarn) if yarn else 0:>+9,.0f} "
+        f"{statistics.fmean(nony) if nony else 0:>+9,.0f}  {note}"
+    )
 
 anchor_rows = by.get(ANCHOR, [])
 anchor_ok = all(r["tie"] for r in anchor_rows)
-print(f"\nanchor is all-tie on the clean set: {anchor_ok}  "
-      f"({sum(r['tie'] for r in anchor_rows)}/{len(anchor_rows)})")
-print("-> the harness reproduces the peer seat-for-seat wherever the engine is "
-      "seat-symmetric, so the audit is VALID on the clean set.")
+print(
+    f"\nanchor is all-tie on the clean set: {anchor_ok}  "
+    f"({sum(r['tie'] for r in anchor_rows)}/{len(anchor_rows)})"
+)
+print(
+    "-> the harness reproduces the peer seat-for-seat wherever the engine is "
+    "seat-symmetric, so the audit is VALID on the clean set."
+)
 
 print("\nVERDICT")
 for route in sorted(by):
@@ -99,7 +115,8 @@ for route in sorted(by):
     wr = w / (w + losses) * 100 if (w + losses) else 0.0
     d = statistics.fmean(r["me_cash"] - r["opp_cash"] for r in rs)
     keep = "REJECT" if wr < 50 else "consider"
-    print(f"  route {route}: {w}W-{losses}L (WR {wr:.1f}% excl ties), "
-          f"Δμ ${d:+,.0f}  -> {keep}")
-print(f"  route {ANCHOR} (incumbent) is retained: no candidate beats it on win rate, "
-      f"which is the selection criterion (see rank_cvar.py).")
+    print(f"  route {route}: {w}W-{losses}L (WR {wr:.1f}% excl ties), Δμ ${d:+,.0f}  -> {keep}")
+print(
+    f"  route {ANCHOR} (incumbent) is retained: no candidate beats it on win rate, "
+    f"which is the selection criterion (see rank_cvar.py)."
+)

@@ -58,18 +58,17 @@ SIDECAR = HERE / "logs" / "claims_sidecar.json"
 # `not_checkable` is the mandatory escape hatch for a Choice that must sum to 1.
 ARTIFACTS: dict[str, str] = {
     "daily_fingerprints": "logs/daily_fingerprints.csv — mined leaderboard episodes: "
-                          "per-team cash, op counts, strategy fingerprints",
+    "per-team cash, op counts, strategy fingerprints",
     "draw_table": "logs/v043_draw_table.csv — per-draw route assignments with in-sample "
-                  "and held-out paired-diff evidence",
+    "and held-out paired-diff evidence",
     "panel_winrate": "the panel win-rate table — win rate per opponent over paired seeds",
-    "ladder_rank": "scripts/rank_ladder.py output — score against the tier 0-5 "
-                   "reference ladder",
+    "ladder_rank": "scripts/rank_ladder.py output — score against the tier 0-5 reference ladder",
     "candidates": "candidates.jsonl — mined 719-step routes and their recorded cash",
     "engine_spec": "the kaggle-environments 1.32.7 kaggriculture spec — prices, costs, "
-                   "caps, timings fixed by the engine",
+    "caps, timings fixed by the engine",
     "arena_run": "local_arena.py output — self-play cash, win rate, crash/timeout counts",
     "not_checkable": "no data file settles this claim; it is narrative, a design "
-                     "rationale, or a judgement",
+    "rationale, or a judgement",
 }
 
 
@@ -83,10 +82,10 @@ ARTIFACTS: dict[str, str] = {
 # repeated per-claim `criteria` outweighing the state 6:1. Packing is therefore
 # driven by the MEASURED payload, not by the 255-option Choice cap.
 # ---------------------------------------------------------------------------
-TOK_PER_CHAR = 0.25       # ~4 chars/token; an estimate, and the only one left here
+TOK_PER_CHAR = 0.25  # ~4 chars/token; an estimate, and the only one left here
 REQUEST_TOK_CAP = 64_000  # models: 64k for state plus all questions
-STATE_TOK_CAP = 32_000    # models: 32k for state plus the longest question
-PACK_HEADROOM = 0.80      # pack to 80% of the cap; placeholders vary in tokenisation
+STATE_TOK_CAP = 32_000  # models: 32k for state plus the longest question
+PACK_HEADROOM = 0.80  # pack to 80% of the cap; placeholders vary in tokenisation
 
 
 def wire_questions(claim_ids: list[str], claims: dict, terse: bool) -> dict:
@@ -102,32 +101,31 @@ def wire_questions(claim_ids: list[str], claims: dict, terse: bool) -> dict:
         qs[f"artifact_{cid}"] = {
             "type": "choice",
             "instructions": f"Which data file listed in available_data_files would "
-                            f"settle whether claim {cid} is still accurate?",
+            f"settle whether claim {cid} is still accurate?",
             "criteria": dict.fromkeys(ARTIFACTS),
         }
         q_measured = {
             "type": "noul",
             "instructions": f"Claim {cid} asserts a specific measured result about "
-                            f"this agent's performance or about the game engine.",
+            f"this agent's performance or about the game engine.",
         }
         q_retired = {
             "type": "noul",
             "instructions": f"The text of claim {cid} says the finding it describes "
-                            f"has been superseded, was wrong, or has been contradicted.",
+            f"has been superseded, was wrong, or has been contradicted.",
         }
         if not terse:
             q_measured["criteria"] = {
                 "true": "States a result, quantity, rate or outcome that was measured "
-                        "or is fixed by the engine, including where the value is "
-                        "masked as a <TYPE:index> placeholder",
+                "or is fixed by the engine, including where the value is "
+                "masked as a <TYPE:index> placeholder",
                 "false": "States a plan, an intention, a rationale, an open question, "
-                         "or a description of tooling, with no measured result",
+                "or a description of tooling, with no measured result",
             }
             q_retired["criteria"] = {
                 "true": "The claim reports that an earlier belief, table, target or "
-                        "prescription turned out to be wrong or has been replaced",
-                "false": "The claim asserts a finding in its own voice without "
-                         "disowning it",
+                "prescription turned out to be wrong or has been replaced",
+                "false": "The claim asserts a finding in its own voice without disowning it",
             }
         qs[f"measured_{cid}"] = q_measured
         qs[f"retired_{cid}"] = q_retired
@@ -136,14 +134,14 @@ def wire_questions(claim_ids: list[str], claims: dict, terse: bool) -> dict:
             q_self = {
                 "type": "noul",
                 "instructions": f"The conclusion stated in claim {cid} is supported by "
-                                f"evidence given inside that same claim.",
+                f"evidence given inside that same claim.",
             }
             if not terse:
                 q_self["criteria"] = {
                     "true": "The claim states both a conclusion and the evidence or "
-                            "mechanism it rests on",
+                    "mechanism it rests on",
                     "false": "The claim asserts a conclusion while the evidence for it "
-                             "sits elsewhere or is not stated",
+                    "sits elsewhere or is not stated",
                 }
             qs[f"self_supported_{cid}"] = q_self
     return qs
@@ -153,21 +151,21 @@ def state_for(claim_ids: list[str], claims: dict, terse: bool) -> dict:
     lines = "\n".join(f"{cid}| {claims[cid]['text']}" for cid in claim_ids)
     st = {
         "what_this_is": "Claims extracted from a Kaggle competition agent's research "
-                        "notes. Measurement values are masked as <TYPE:index> "
-                        "placeholders on purpose; judge what each claim MEANS, never "
-                        "the value of a masked number.",
+        "notes. Measurement values are masked as <TYPE:index> "
+        "placeholders on purpose; judge what each claim MEANS, never "
+        "the value of a masked number.",
         "available_data_files": ARTIFACTS,
         "claims": lines,
     }
     if terse:
         st["question_definitions"] = {
             "measured": "true when the claim states a result, quantity, rate or "
-                        "outcome that was measured or is fixed by the engine; false "
-                        "for plans, rationale, open questions or tooling description",
+            "outcome that was measured or is fixed by the engine; false "
+            "for plans, rationale, open questions or tooling description",
             "retired": "true when the claim reports that an earlier belief, table, "
-                       "target or prescription was wrong or has been replaced",
+            "target or prescription was wrong or has been replaced",
             "self_supported": "true when the claim states both a conclusion and the "
-                              "evidence or mechanism it rests on",
+            "evidence or mechanism it rests on",
         }
     return st
 
@@ -185,9 +183,11 @@ def pack(all_ids: list[str], claims: dict, terse: bool) -> list[list[str]]:
     for cid in all_ids:
         trial = cur + [cid]
         s_tok, q_tok = request_tokens(trial, claims, terse)
-        over = (s_tok + q_tok > REQUEST_TOK_CAP * PACK_HEADROOM
-                or s_tok > STATE_TOK_CAP * PACK_HEADROOM
-                or len(trial) > CHOICE_OPTION_CAP)
+        over = (
+            s_tok + q_tok > REQUEST_TOK_CAP * PACK_HEADROOM
+            or s_tok > STATE_TOK_CAP * PACK_HEADROOM
+            or len(trial) > CHOICE_OPTION_CAP
+        )
         if cur and over:
             out.append(cur)
             cur = [cid]
@@ -204,8 +204,11 @@ CHOICE_OPTION_CAP = 255
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--show", metavar="CLAIM_ID")
-    ap.add_argument("--terse", action="store_true",
-                    help="drop per-claim criteria; definitions go in the state once")
+    ap.add_argument(
+        "--terse",
+        action="store_true",
+        help="drop per-claim criteria; definitions go in the state once",
+    )
     ap.add_argument("--dump-request", type=int, metavar="REQUEST_INDEX")
     args = ap.parse_args()
 
@@ -233,20 +236,22 @@ def main() -> None:
         tot_tok = tot_q = 0
         label = "terse (criteria in state)" if terse else "full (criteria per claim)"
         print(f"\n=== {label} ===")
-        print(f"{'req':>4} {'claims':>7} {'questions':>10} {'state':>8} "
-              f"{'quest':>8} {'total':>8}  cap")
+        print(
+            f"{'req':>4} {'claims':>7} {'questions':>10} {'state':>8} "
+            f"{'quest':>8} {'total':>8}  cap"
+        )
         for i, ids in enumerate(reqs):
             s_tok, q_tok = request_tokens(ids, claims, terse)
             nq = len(wire_questions(ids, claims, terse))
-            ok = "OK" if s_tok + q_tok <= REQUEST_TOK_CAP and s_tok <= STATE_TOK_CAP \
-                 else "OVER"
-            print(f"{i:>4} {len(ids):>7} {nq:>10} {s_tok:>8} {q_tok:>8} "
-                  f"{s_tok + q_tok:>8}  {ok}")
+            ok = "OK" if s_tok + q_tok <= REQUEST_TOK_CAP and s_tok <= STATE_TOK_CAP else "OVER"
+            print(f"{i:>4} {len(ids):>7} {nq:>10} {s_tok:>8} {q_tok:>8} {s_tok + q_tok:>8}  {ok}")
             tot_tok += s_tok + q_tok
             tot_q += nq
-        print(f"{len(reqs)} requests, {tot_q} questions, ~{tot_tok} input tokens, "
-              f"${tot_tok / 1e9 * 42:.6f}/pass  (1,000 passes "
-              f"${tot_tok / 1e9 * 42 * 1000:.2f})")
+        print(
+            f"{len(reqs)} requests, {tot_q} questions, ~{tot_tok} input tokens, "
+            f"${tot_tok / 1e9 * 42:.6f}/pass  (1,000 passes "
+            f"${tot_tok / 1e9 * 42 * 1000:.2f})"
+        )
         if not args.terse:
             continue
 

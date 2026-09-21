@@ -16,8 +16,15 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FORBIDDEN = {"typesafe_sdk", "typesafe_credentials", "jev_client", "httpx", "httpx2",
-             "requests", "urllib.request"}
+FORBIDDEN = {
+    "typesafe_sdk",
+    "typesafe_credentials",
+    "jev_client",
+    "httpx",
+    "httpx2",
+    "requests",
+    "urllib.request",
+}
 
 # Everything the submission is allowed to reach: main.py plus the versioned snapshots
 # the arena plays it against.
@@ -44,15 +51,17 @@ def test_submission_does_not_import_jev_tooling() -> None:
 
 def test_main_has_no_network_capable_import() -> None:
     mods = _imports(ROOT / "main.py")
-    net = {m for m in mods
-           if m.split(".")[0] in {"socket", "http", "urllib", "ssl", "asyncio"}}
+    net = {m for m in mods if m.split(".")[0] in {"socket", "http", "urllib", "ssl", "asyncio"}}
     assert not net, f"main.py imports network-capable modules: {net}"
 
 
 def test_credentials_file_is_gitignored() -> None:
     r = subprocess.run(
         ["git", "check-ignore", "typesafe_credentials.py"],
-        cwd=ROOT, capture_output=True, text=True, check=False,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert r.returncode == 0, (
         "typesafe_credentials.py is NOT gitignored — it bills a real TypeSafe account"

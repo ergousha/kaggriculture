@@ -59,9 +59,7 @@ def runtime_hash(path: Path) -> str | None:
     i = s.find("AGENT_VERSION")
     if i < 0:
         return None
-    body = "\n".join(
-        line for line in s[i:].splitlines() if not line.startswith("AGENT_VERSION")
-    )
+    body = "\n".join(line for line in s[i:].splitlines() if not line.startswith("AGENT_VERSION"))
     return hashlib.sha256(body.encode()).hexdigest()
 
 
@@ -81,12 +79,14 @@ def fetch_submissions() -> list[dict]:
     api.authenticate()
     out = []
     for s in api.competition_submissions("kaggriculture"):
-        out.append({
-            "date": str(s.date),
-            "status": str(s.status).split(".")[-1],
-            "score": float(s.public_score) if s.public_score else None,
-            "description": s.description or "",
-        })
+        out.append(
+            {
+                "date": str(s.date),
+                "status": str(s.status).split(".")[-1],
+                "score": float(s.public_score) if s.public_score else None,
+                "description": s.description or "",
+            }
+        )
     return out
 
 
@@ -98,8 +98,9 @@ def version_of(desc: str) -> str | None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--offline", action="store_true", help="use logs/live_scores.json")
-    ap.add_argument("--append", action="store_true",
-                    help="append this read to the cache as a time series")
+    ap.add_argument(
+        "--append", action="store_true", help="append this read to the cache as a time series"
+    )
     args = ap.parse_args()
 
     if args.offline:
@@ -148,8 +149,10 @@ def main() -> None:
         for v, sc, d in sorted(rows, key=lambda r: r[2]):
             print(f"    {d}  v{v:<7} {sc:>8.1f}")
         if len(scores) > 1:
-            print(f"    -> n={len(scores)}  mean {statistics.fmean(scores):.1f}  "
-                  f"SPREAD {spread:.1f} on IDENTICAL code")
+            print(
+                f"    -> n={len(scores)}  mean {statistics.fmean(scores):.1f}  "
+                f"SPREAD {spread:.1f} on IDENTICAL code"
+            )
 
     print("\n" + "=" * 74)
     if worst_spread:
@@ -157,8 +160,10 @@ def main() -> None:
         print(f"=> Treat any cross-version score gap below {worst_spread:.0f} as")
         print("   UNRESOLVED, not as a regression or an improvement.")
     else:
-        print("No runtime has more than one scored submission yet, so the "
-              "reproducibility of `public_score` is still unmeasured.")
+        print(
+            "No runtime has more than one scored submission yet, so the "
+            "reproducibility of `public_score` is still unmeasured."
+        )
     if unmapped:
         print(f"\nunmapped submissions (no opponents/ snapshot): {len(unmapped)}")
         for d, sc in unmapped[:6]:
