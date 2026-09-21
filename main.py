@@ -29,11 +29,31 @@ WHY (measured 2026-09-14, docs/proposal-2026-09-14-endgame.md):
   (vs opponents/v0_2_7.py, 30 eps x seeds 2000000/1000000, mean $117.8k vs $83.0k)
   and realizes +$51k/game sell revenue (WOOL +$35k via day-0 sheep, TOMATO/CARROT
   pot products, sell-spam liquidation). See logs/ for arena runs.
+
+v0.5.0 (2026-09-21): BASELINE LOCK. Runtime is BYTE-IDENTICAL to v0.4.3 --
+  same 42-tape portfolio, same layers, same openings, same 19-assignment
+  conservative day-6 routing table, same day-27 endgame switch to route 2.
+  Only this header block and AGENT_VERSION differ, so the live read on v0.5.0
+  measures exactly the v0.4.3 configuration and inherits its offline evidence
+  (held-out +$1,038/game, 19/20 pairs retaining positive; Step 1 panel of
+  docs/proposal-2026-09-16-v043.md).
+
+  The version exists to mark the point iteration restarts from, and to record
+  that the last open question about this configuration is now closed:
+  Step 3's day-27 endgame A/B, which self-voided on 3 anchor non-ties, has been
+  re-scored with those seeds excluded as engine-seat-asymmetric rather than
+  discarding the run (scripts/endgame_rescore.py). On the 171 clean episodes
+  the anchor ties 57/57 and both challengers lose outright -- route 1 at
+  0W-57L (-$1,040/game) and route 5 at 0W-43L (-$9/game). Route 2 is retained
+  on measurement, not inheritance. The endgame is no longer a suspect.
+
+  Nothing in this version is a new hypothesis. The next version's diff should
+  carry exactly one.
 """
 
 # from __future__ import annotations  # stripped for submit.py allowlist (stdlib, cosmetic)
 
-AGENT_VERSION = "0.4.3"
+AGENT_VERSION = "0.5.0"
 
 import copy
 
