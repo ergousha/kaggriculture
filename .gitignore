@@ -1,6 +1,9 @@
 # Kaggle API credentials — full account access. NEVER commit.
 kaggle_credentials.py
 
+# TypeSafe/Jev API key — bills the account. NEVER commit.
+typesafe_credentials.py
+
 # Match replays, decision logs, submission history
 logs/
 replays/
