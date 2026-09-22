@@ -1,0 +1,254 @@
+[
+ {
+  "shop1": "PIZZA_SHOP",
+  "shop2": "SMOOTHIE_SHOP",
+  "route": 124,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111959932-replay.py",
+  "swap": 0,
+  "me": 142322.0,
+  "opp": 174777.0,
+  "pair": [
+   "PIZZA_SHOP",
+   "SMOOTHIE_SHOP"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PIZZA_SHOP",
+  "shop2": "SMOOTHIE_SHOP",
+  "route": 2,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111959932-replay.py",
+  "swap": 0,
+  "me": 140982.0,
+  "opp": 175274.0,
+  "pair": [
+   "PIZZA_SHOP",
+   "SMOOTHIE_SHOP"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PIZZA_SHOP",
+  "shop2": "SMOOTHIE_SHOP",
+  "route": 124,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111959932-replay.py",
+  "swap": 1,
+  "me": 142322.0,
+  "opp": 174777.0,
+  "pair": [
+   "PIZZA_SHOP",
+   "SMOOTHIE_SHOP"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PIZZA_SHOP",
+  "shop2": "SMOOTHIE_SHOP",
+  "route": 2,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111959932-replay.py",
+  "swap": 1,
+  "me": 140982.0,
+  "opp": 175274.0,
+  "pair": [
+   "PIZZA_SHOP",
+   "SMOOTHIE_SHOP"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "BRUNCH_SPOT",
+  "shop2": "BAKERY",
+  "route": 103,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111966707-replay.py",
+  "swap": 0,
+  "me": 84790.0,
+  "opp": 80363.0,
+  "pair": [
+   "BRUNCH_SPOT",
+   "BAKERY"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "BRUNCH_SPOT",
+  "shop2": "BAKERY",
+  "route": 110,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111966707-replay.py",
+  "swap": 0,
+  "me": 86888.0,
+  "opp": 90927.0,
+  "pair": [
+   "BRUNCH_SPOT",
+   "BAKERY"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "BRUNCH_SPOT",
+  "shop2": "BAKERY",
+  "route": 103,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111966707-replay.py",
+  "swap": 1,
+  "me": 84790.0,
+  "opp": 80363.0,
+  "pair": [
+   "BRUNCH_SPOT",
+   "BAKERY"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "BRUNCH_SPOT",
+  "shop2": "BAKERY",
+  "route": 110,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111966707-replay.py",
+  "swap": 1,
+  "me": 86888.0,
+  "opp": 90927.0,
+  "pair": [
+   "BRUNCH_SPOT",
+   "BAKERY"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 11,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111967831-replay.py",
+  "swap": 0,
+  "me": 110138.0,
+  "opp": 83149.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 12,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111967831-replay.py",
+  "swap": 0,
+  "me": 85404.0,
+  "opp": 46335.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 11,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111967831-replay.py",
+  "swap": 1,
+  "me": 95765.0,
+  "opp": 91837.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 12,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111967831-replay.py",
+  "swap": 1,
+  "me": 85819.0,
+  "opp": 46487.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 11,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111969081-replay.py",
+  "swap": 1,
+  "me": 109626.0,
+  "opp": 57525.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 12,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111969081-replay.py",
+  "swap": 1,
+  "me": 127060.0,
+  "opp": 61858.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 11,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111955015-replay.py",
+  "swap": 0,
+  "me": 145465.0,
+  "opp": 48282.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 12,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111955015-replay.py",
+  "swap": 0,
+  "me": 111346.0,
+  "opp": 54946.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 11,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111955015-replay.py",
+  "swap": 1,
+  "me": 145465.0,
+  "opp": 48282.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ },
+ {
+  "shop1": "PET_CAFE",
+  "shop2": "YARN_STORE",
+  "route": 12,
+  "replay": "/Users/eakin/Projects/ergousha/kaggriculture/logs/_v052_refit/opp_episode-111955015-replay.py",
+  "swap": 1,
+  "me": 111346.0,
+  "opp": 54946.0,
+  "pair": [
+   "PET_CAFE",
+   "YARN_STORE"
+  ],
+  "error": ""
+ }
+]
