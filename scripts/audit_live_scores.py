@@ -56,10 +56,16 @@ def runtime_hash(path: Path) -> str | None:
     if not path.exists():
         return None
     s = path.read_text(encoding="utf-8")
-    i = s.find("AGENT_VERSION")
-    if i < 0:
+    # Anchor on the ASSIGNMENT, not the first textual mention: from v0.5.0 on, the
+    # module docstring itself talks about AGENT_VERSION, so `find` landed inside the
+    # header and silently hashed prose as if it were runtime. That made every
+    # "byte-identical runtime" claim depend on the wording of the docstring.
+    match = re.search(r'^AGENT_VERSION = ".*"$', s, re.M)
+    if match is None:
         return None
-    body = "\n".join(line for line in s[i:].splitlines() if not line.startswith("AGENT_VERSION"))
+    body = "\n".join(
+        line for line in s[match.start() :].splitlines() if not line.startswith("AGENT_VERSION")
+    )
     return hashlib.sha256(body.encode()).hexdigest()
 
 
