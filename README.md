@@ -12,9 +12,8 @@ Python 3.12+.
 
 > [!IMPORTANT]
 > **Post-Competition Retrospective & Lessons Learned:**
-> The Kaggle Kaggriculture competition has concluded. The winning solution by team **M & M & P & Q** ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)) has been published.
-> For an in-depth retrospective on why our *"above $56k this is not a strategy competition, but open-loop route replay"* hypothesis proved wrong, our premature abandonment of ML in v0.0.8, the fragility of static tapes, and a detailed comparison with the champion's 11.9B-step Transformer + PPO architecture:
-> 👉 **See the [Lessons Learned Section](#lessons-learned-1st-place-solution-analysis--retrospective)** or read the full report: **[docs/lessons_learned_1st_place.md](docs/lessons_learned_1st_place.md)**.
+> The Kaggle Kaggriculture competition has concluded. Team **M & M & P & Q** published their 1st place solution ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)).
+> See **[Lessons Learned](#lessons-learned-post-mortem)** below for the seven core principles we are carrying forward, and **[docs/lessons_learned_1st_place.md](docs/lessons_learned_1st_place.md)** for the full comparison matrix, breakdown of Final Agents A and B, and analysis of where our reasoning held up and where it slipped.
 
 **v0.2.0 changed architecture.** The submission is now a *route-replay* agent: one
 recorded 719-step action route plus bounded WEED repair, SELL-slot ordering by price
@@ -89,87 +88,19 @@ uv run python submit.py --dry-run
 
 ---
 
-## Lessons Learned: 1st Place Solution Analysis & Retrospective
+## Lessons Learned (Post-Mortem)
 
-Following the completion of the Kaggle **Kaggriculture** competition, the winning solution by team **M & M & P & Q** ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)) has been thoroughly analyzed and compared against the design choices of this project.
+Comparing our trajectory against the 1st place solution by **M & M & P & Q** ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)) — a 10.23M-parameter Transformer trained via alternating Behavior Cloning, C++ heuristic teacher demonstrations, and 11.92B steps of self-play PPO on a custom Rust simulator, deployed as **Final A** (action-repair rules + Day 29 C++ search handoff) and **Final B** (sequential unit action masks) — distilled seven principles for future competitions.
 
-The complete in-depth technical analysis is available in **[docs/lessons_learned_1st_place.md](docs/lessons_learned_1st_place.md)**. Below is an executive summary of key takeaways, comparison matrix, pitfalls, and transferable principles.
+Full comparison matrix, technical breakdown, and analysis are in **[docs/lessons_learned_1st_place.md](docs/lessons_learned_1st_place.md)**.
 
-### 1. Comprehensive Comparison Matrix
-
-| Dimension | Our Approach (`ergousha`) | 1st Place Solution (`msdsm / M & M & P & Q`) | Key Finding / Lesson Learned |
-| :--- | :--- | :--- | :--- |
-| **Core Paradigm** | **Route-Replay / Metacounter:** Replaying a frozen 719-step action tape + minimal WEED repair + Day-6 shop-draw table across 64 pairs. | **Hybrid Neural-Search:** 10.23M Transformer (closed-loop BC + PPO) + rule-based repairs + Day 29 C++ local search handoff (Agent A) / Sequential action masks (Agent B). | Static replay was brittle against market and seed variations; the champion agent responded dynamically to live board and market states. |
-| **Learning & Optimization** | Naive BC collapsed in v0.0.8 ($2.9k) $\rightarrow$ **ML was completely deleted**. Only 23 macro parameters searched via CEM / Evolutionary search. | **BC $\leftrightarrow$ PPO $\leftrightarrow$ Heuristics Flywheel:** 11.9 Billion environment steps (8.3M self-play games) in JAX + custom Rust engine (`kagg-engine`). Net2Net depth growth (6 $\rightarrow$ 12 blocks). | We hit a dead end trying to mutate static tapes; the champion attained massive tactical depth through billions of RL steps. |
-| **Observation Representation** | v0.0.8 used an incomplete 4D vector (`[day, hour, money, hands]`). In route-replay, observation was only used for shop detection & weed repair. | **264 Tokens $\times$ 124 Features:** Farm tiles (200), units (40), market slots (10), commodities (12), global state, and opponent inventory tracker. 2D RoPE spatial encoding. | The champion learned spatial attention over a fully Markovian state; our model was blind to prices, inventories, and crop maturities. |
-| **Action Space & Coordination** | Raw action tapes from mined replays. Local mutation attempts broke delicate order/cash dependencies. | **Sequential Action Masking:** Units sampled sequentially (farmer first, then hands); each unit's choice dynamically masks tiles and seed inventories for subsequent units. Absolute SELL quantity head (1-100). | The champion eliminated multi-unit action collisions at the architectural level; we remained hostage to the tape's rigid schedule. |
-| **Market & Economy** | Exact execution of recorded cash schedules. Milk metering failed due to shed capacity (100) constraints. | Neural policy emits dynamic market orders; rule layer enforces pre-night liquidation of overflow above shed capacity (100) and endgame stock dumping. | The champion pro-actively managed shed capacity and dynamically aligned sales with live prices. |
-| **Endgame Execution** | Static DROP/SELL on steps 717-719. Replayed verbatim from tape. | **Agent A:** At dawn of Day 29 (final 24 hours), control transfers to a C++ Simulated Annealing search engine (~6s search). Joint optimization of harvest, transport, and liquidation. | Search was applied where it belongs: in the endgame where the time horizon collapses and the environment becomes largely deterministic. |
-| **Simulation Infrastructure** | Python `kaggle-environments` (~2.4s/game). 12 CPU workers running overnight sieves. | **High-Performance Rust Simulator (`native/engine`):** Zero-copy JAX GPU rollouts. **11,922,122,946 environment steps**. | **100,000× compute scale asymmetry.** Simulator throughput dictated the boundary of strategic exploration. |
-| **Validation Methodology** | Paired-seed CRN, CVaR₅, opponent panel win rates, LOO cross-validation, winner's curse tracking (Industry-grade rigor). | Equivalent statistical rigor + targeted generation of synthetic shop scenarios (tomato / extreme distributions) to fix policy blind spots. | Our experimental rigor was world-class, but was applied to optimize an over-constrained, brittle hypothesis. |
-
----
-
-### 2. What We Did Right (Strengths)
-
-1. **Statistical & Empirical Rigor:**
-   - **Common Random Numbers (CRN / paired seeds):** Eliminated seed noise across all A/B evaluations and searches.
-   - **P(win) & Margin CVaR₅ Formulation:** Recognized that final cash was 86% common-mode variance caused by shared shop draws. Pivoted selection from own-cash to head-to-head win rate and margin CVaR₅ against an opponent panel.
-   - **Winner's Curse Awareness:** Faithfully measured and reported shrinkage between selection seeds and held-out evaluation sets.
-2. **Deep Economic Analysis:**
-   - Proved that EGG was an economic trap (0.6% revenue share in the top decile), despite flat price curves.
-   - Mathematically proved that applying fertilizer to strawberries yielded 2× production, vastly outperforming selling raw fertilizer.
-   - Discovered that `obs.private.shed` reflects the state *prior* to unit actions (`observation ordering`), preventing catastrophic inventory truncation.
-3. **Software Engineering Standards:**
-   - Automatic opponent versioning via pre-commit hooks (`sync_opponent.py`). Pre-flight verification assertions prevented runtime quirks (such as Kaggle evaluating the *last callable* in the file). Zero crashes and zero timeouts across all official submissions.
-
----
-
-### 3. What We Did Wrong (Critical Pitfalls)
-
-1. **The Fatal Misdiagnosis of v0.0.8 (Premature Abandonment of ML):**
-   - In v0.0.8, an initial Behavior Cloning model collapsed against the environment's starter bot ($2,910 vs $75,668).
-   - The failure was entirely caused by concrete implementation bugs:
-     - Missing `FEED`, `CARE`, and `PICKUP` action tokens (mapped to `PASS`).
-     - Non-Markovian state: 4 scalar numbers (`[day, hour, money, hands]`), lacking prices, inventories, crop stages, and animal counts.
-     - Spatial label collisions on a $10 \times 10$ grid causing 84% `PASS` bias.
-     - Unsound RL loop: argmax rollouts weighted by episode return without a critic or GAE.
-   - **The Mistake:** Instead of diagnosing these bugs, the project concluded:
-     > *"Above ~$56k this is not a strategy competition — every ladder rung above 5, and the current #1, is a fixed plan with a thin repair layer... learning has no place here."*
-   - All ML code was deleted (`rm -rf rl/`), locking the project into the open-loop replay paradigm, while the winner proved that Transformer + PPO was the ultimate winning architecture.
-2. **Getting Trapped in the Open-Loop Route-Replay Paradigm:**
-   - Replaying a static 719-step action tape increased the reference ladder score from 36 to 60/60, creating a false sense of mastery.
-   - But an open-loop tape is inherently blind to environment stochasticity. Shops spawn randomly every 3 days; an 8-12 day crop cycle tied to a static tape is completely exposed to adverse market draws.
-3. **Searching Over a Brittle Cash Schedule (Issues #26–#30):**
-   - Weeks were spent attempting to mutate the recorded tape (Manhattan path shortening, milk sales metering).
-   - But a mined tape is an over-tuned, rigid cash schedule: 319 of 458 funded orders cannot be delayed by a single step. Shifting just 5 market orders out of 927 degraded panel win rate by 7.2%.
-4. **The False Latency Dichotomy:**
-   - We reasoned: *"Decision latency is 8-12 days, shop respawn is 3 days, therefore closed-loop adaptation is impossible and open-loop is the equilibrium."*
-   - This was a false dilemma. A closed-loop policy does not need to abandon a crop mid-growth; it dynamically manages portfolio risk, shifts harvesting and selling priorities based on spot prices, manages shed headroom, and absorbs weed/worker perturbations.
-
----
-
-### 4. What We Missed (Key Gaps)
-
-1. **Compute Engine Asymmetry (Python vs. Rust):**
-   - We simulated in standard Python `kaggle-environments` (~2.4s per game). A 12-worker CPU overnight run processed at most a few tens of thousands of games.
-   - The 1st place team built `kagg-engine` in Rust with zero-copy JAX bindings, simulating **11.92 Billion steps** (~100,000× more experience).
-2. **Multi-Entity Transformer with 2D RoPE:**
-   - The winner represented the full spatial environment via 264 tokens, enabling self-attention across cells, units, and market slots.
-3. **Sequential Action Masking:**
-   - Solved multi-unit spatial and resource conflicts cleanly inside the policy forward pass rather than relying on brittle greedy heuristics or Hungarian matching.
-4. **Endgame-Only Local Search:**
-   - Rather than attempting to optimize an intractable 720-step schedule, the winner restricted search to the deterministic 24-step endgame (Day 29), extracting maximum value when it mattered most.
-
----
-
-### 5. Five Actionable Principles for Future Competitions
-
-- **Principle 1 (Diagnose the Bug, Not the Paradigm):** If an ML/RL baseline fails against a trivial starter bot, the failure is almost certainly an implementation bug, not proof that ML is unviable. Never abandon a paradigm without an audit of state, action, and gradient flow.
-- **Principle 2 (Fast Simulator First):** In simulation and RL competitions, invest the first 1-2 weeks in building a high-speed simulation engine in Rust, C++, or JAX. An agent trained on 11 billion steps will overwhelmingly defeat hand-crafted rules trained on 100 thousand steps.
-- **Principle 3 (Open-Loop Replay is a Local Optimum):** Replaying elite action traces provides an easy early boost on static benchmarks, but creates a fragile agent incapable of handling stochastic shocks or adversarial counter-play.
-- **Principle 4 (The Hybrid Flywheel Wins):** Do not treat RL, imitation learning, heuristics, and search as mutually exclusive. The winning strategy is an iterative flywheel: `BC ➔ PPO ➔ Heuristic synthetic generation ➔ BC refinement ➔ Rule-based runtime guards`.
-- **Principle 5 (Reserve Search for Collapsed Horizons):** Combinatorial search over long stochastic horizons is noisy and intractable. Restrict local search to the endgame (the final 5-10% of steps) where uncertainty collapses and terminal value can be greedily extracted.
+1. **An experiment only refutes what it actually tested (Duhem–Quine problem).** `v0.0.8` bundled Behavior Cloning with missing action tokens (`FEED`/`CARE`/`PICKUP`), a 4-scalar non-Markovian state, grid label collisions, and a critic-free update. It tested a broken pipeline, not the ML hypothesis. *Practice:* Run validity gates before abandoning a paradigm — verify 100% label coverage, overfit a single batch, and verify the model can clone the starter bot.
+2. **Never assign probability zero, and never make a belief irreversible (Cromwell's rule).** Concluding *"learning has no place here"* and deleting `rl/` turned one flawed experiment into a permanent commitment. *Practice:* Archive paused branches rather than deleting them, and attach an explicit revisit trigger to each.
+3. **The leaderboard shows what has been built, not what is possible.** Observing that early leaders above tier 5 used fixed action plans confused what is *fastest to build* with the game's strategic ceiling. *Practice:* Ask what the leaderboard will look like in four weeks when teams finish high-investment infrastructure approaches.
+4. **Rigor protects you from noise, not from the wrong question (Goodhart's law).** Paired-seed CRN, CVaR₅, and LOO cross-validation gave strong internal validity, but scoring 60/60 on the reference ladder rewarded memorizing that ladder, and measuring that 319 of 458 orders had zero slack (`#30`) was read as an engineering obstacle rather than a verdict on open-loop tapes. *Practice:* Treat structural fragility and sensitivity to environmental perturbations as first-class metrics alongside within-distribution win rate.
+5. **Match the method to how much you can know in each phase.** The winner used a reactive learned policy where the horizon is long and stochastic (Days 0–28), local C++ search where the horizon is short and deterministic (Day 29 in Agent A), and hard rules/masks where errors are catastrophic and easily checked (shed overflow, seed limits, tile collisions). *Practice:* Map each game phase by horizon length, stochasticity, and error cost, then assign search, policy, or rules accordingly.
+6. **Estimate what each approach can reach with your resources.** At 2.4 s/game in Python on 12 CPU cores, our project ran ~10⁸ environment steps across the competition versus the winner's 11.92B steps on a Rust engine + GPUs (a 10²–10³× gap). *Practice:* Benchmark steps/sec in Week 1, compute the total episode budget before the deadline, and explicitly choose between building a compiled simulator or committing to sample-efficient methods.
+7. **Keep rival hypotheses alive in parallel.** The winning four-person team ran competing hypotheses concurrently (10M self-play scaling, 20M parameter scaling, C++ heuristic search, and rule patches) and submitted two distinct inference controllers (Final A and Final B). *Practice:* Even solo, allocate ~20% of time and one of the two final submission slots to the strongest alternative hypothesis.
 
 ---
 
