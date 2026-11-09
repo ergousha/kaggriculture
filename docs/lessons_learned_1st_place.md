@@ -1,221 +1,151 @@
-# Kaggriculture Post-Mortem: 1.lik Çözümünün Analizi ve Öğrenilen Dersler
+# Kaggriculture Post-Mortem: Analysis of the 1st Place Solution & Lessons Learned
 
-Bu doküman, Kaggle **Kaggriculture** simülasyon yarışmasının tamamlanmasının ardından; yarışmayı 1. sırada tamamlayan **M & M & P & Q** takımının çözümü ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)) ile bu depoda geliştirilen çözümün ([ergousha/kaggriculture](https://github.com/ergousha/kaggriculture)) derinlemesine, teknik ve yapılandırılmış karşılaştırmalı retrospektifidir.
+This document provides an in-depth, technical, and comparative retrospective analyzing the winning solution by team **M & M & P & Q** ([msdsm/kaggriculture-1st-solution](https://github.com/msdsm/kaggriculture-1st-solution) & [Writeup](https://kaggle.com/competitions/kaggriculture/writeups/1st-place-solution-our-journey-to-becoming-profe)) against our codebase ([ergousha/kaggriculture](https://github.com/ergousha/kaggriculture)) following the conclusion of the Kaggle **Kaggriculture** competition.
 
 ---
 
-## 1. Yönetici Özeti (Executive Summary)
+## 1. Executive Summary
 
-Kaggriculture, 720 adımlık (30 gün × 24 saat), 17'ye kadar işçi/çiftçi birimini yönetmeyi, dinamik fiyat eğrilerine sahip bir kasaba pazarını ve her 3 günde bir rastgele açılan dükkanları içeren çok katmanlı, stokastik bir kaynak yönetimi simülasyonuydu.
+Kaggriculture is a 720-step (30 days × 24 hours), multi-agent resource management simulation involving up to 17 workers/farmers, dynamic commodity price curves, quadratic price penalties, and stochastic shop spawns every 3 days.
 
-Bu projede (`ergousha/kaggriculture`), olağanüstü bir deneysel disiplin, istatistiksel titizlik (CRN, CVaR₅, panel kazanma oranı, LOO çapraz doğrulama) ve derinlemesine pazar madenciliği uygulanmış; ancak projenin erken aşamasında yaşanan bir başarısızlık (v0.0.8'deki ilkel BC modelinin çöküşü) makine öğreniminin tamamen terk edilmesine ve projenin **"Açık Döngülü Rota Tekrarı" (Open-Loop Route Replay)** yerel optimumuna hapsolmasına yol açmıştır.
+In this repository (`ergousha/kaggriculture`), we established rigorous empirical discipline, advanced statistical validation (Common Random Numbers, CVaR₅, opponent panel win rates, leave-one-out cross-validation), and extensive market data mining. However, an early catastrophic failure (the collapse of a naive Behavior Cloning model in v0.0.8) led to a premature theoretical generalization: concluding that machine learning had no place in this game and that top tiers were purely static scripts. Consequently, the project abandoned ML and became trapped in the **"Open-Loop Route Replay"** local optimum.
 
-Buna karşın yarışmayı kazanan ekip (**1st Place**), **Transformer mimarisi + İteratif Davranış Klonlama (BC) + Rust tabanlı yüksek hızlı motorla 11.9 Milyar adımlık Self-Play PPO + Kural Tabanlı Düzeltmeler + 29. Gün C++ Yerel Arama Devri** mimarisiyle uçtan uca kapalı döngü (closed-loop) öğrenme ile sezgisel sistemlerin kusursuz bir hibritini inşa etmiştir.
+In stark contrast, the 1st place team constructed a masterclass hybrid architecture: **a 10.23M-parameter Transformer backbone trained with an alternating flywheel (Behavior Cloning $\leftrightarrow$ Self-Play PPO $\leftrightarrow$ Synthetic Heuristic Demonstrations across 11.9 Billion environment steps on a custom Rust simulation engine) + Rule-Based Action Patches + Day 29 C++ Simulated Annealing Search Handoff**.
 
-### Temel Karşılaştırma Tablosu
+### Comprehensive Comparison Matrix
 
-| Boyut | Bizim Yaklaşımımız (`ergousha`) | 1.lik Çözümü (`msdsm / M & M & P & Q`) | Stratejik Etki & Sonuç |
+| Dimension | Our Approach (`ergousha`) | 1st Place Solution (`msdsm / M & M & P & Q`) | Strategic Impact & Lessons |
 | :--- | :--- | :--- | :--- |
-| **Ana Paradigma** | **Route-Replay / Metacounter:** 719 adımlık dondurulmuş aksiyon kaseti + sınırlı WEED onarımı + 64 dükkan çekilişi için rota seçimi. | **Hibrit Nöral-Arama:** 10.23M Transformer (BC + PPO) + Sezgisel aksiyon onarımı + 29. Gün C++ yerel arama devri (Agent A) / Sıralı maskeli PPO (Agent B). | Statik rota değişen pazar ve tohum koşullarında kırılgan kaldı; şampiyon her adımda dinamik tepki üretti. |
-| **Öğrenme & Optimizasyon** | v0.0.8'de ilkel BC çöktü ($2.9k) $\rightarrow$ ML tamamen silindi. Sadece makro hiperparametreler CEM / Evrimsel Arama ile optimize edildi. | **BC $\leftrightarrow$ PPO $\leftrightarrow$ Sezgisel Döngüsü:** 11.9 Milyar ortam adımı (8.3M oyun), JAX + Rust motoru. Net2Net derinlik artırımı (6 $\rightarrow$ 12 blok). | Biz yerel rota mutasyonlarında tıkandık; şampiyon milyarlarca adımla taktiksel derinlik kazandı. |
-| **Gözlem Temsili (Observation)** | v0.0.8'de eksik 4 boyutlu vektör (`[day, hour, money, hands]`). Sonrasında gözlem yalnızca dükkan algılama ve WEED onarımı için kullanıldı. | **264 Token $\times$ 124 Öznitelik:** Çiftlik kareleri (200), birimler (40), pazar slotları (10), emtialar (12), küresel durum ve rakip envanter hafızası. 2D RoPE uzamsal kodlama. | Şampiyon tam Markovyen durum temsili ve uzamsal dikkat kurarken, biz durumu gözlemlemeyi bıraktık. |
-| **Aksiyon Temsili & Yönetimi** | İndirilen replay kasetinin ham aksiyonları. Değişiklik denemeleri (nakit takvimi, yol kısaltma) kural bağımlılıklarını bozdu. | **Sıralı Aksiyon Maskeleme (Sequential Masking):** Çiftçi ve işçiler sırayla seçilir; her seçim sonraki işçinin tohum ve kare havuzunu anlık maskeler. Mutlak SELL miktarı kafası (1-100). | Şampiyon birimler arası görev çakışmasını mimari düzeyde sıfırladı; biz kasetin hassas dengesine bağımlı kaldık. |
-| **Pazar ve Ekonomi Yönetimi** | Kasetin nakit akışı harfiyen uygulandı. Süt bekletme (metering) ambar sınırı (100) yüzünden çöktü. | Nöral politika dinamik pazar emirleri üretir; kural katmanı ambar taşmasını gece öncesi satar, kritik ürünleri korur. | Şampiyon ambar kapasitesini (100) proaktif yönetti, satışı dinamik fiyatlara uydurdu. |
-| **Oyun Sonu (Endgame)** | 718-719'da statik DROP/SELL. Kaset ne yaptıysa o tekrarlandı. | **Agent A:** 29. gün şafağında (son 24 saat) C++ Simulated Annealing motoruna devir teslim (~6 sn arama). Terminal nakit maksimizasyonu. | Arama doğru yerde kullanıldı: ufkun daraldığı, durumun deterministikleştiği son 24 saatte tam optimizasyon. |
-| **Simülasyon Altyapısı** | Python `kaggle-environments` (~2.4s/oyun). 12 CPU worker ile günde on binlerce simülasyon. | **Rust Simülatörü (`native/engine`):** JAX ile GPU üzerinde paralel rollouts. 11.922.000.000 simülasyon adımı. | **100.000 kat hesaplama ölçeği farkı.** Simülatör hızı strateji alanının genişliğini belirledi. |
-| **Metodoloji & Doğrulama** | Paired-seed CRN, CVaR₅, panel kazanma oranı, LOO çapraz doğrulama, winner's curse tespiti (Örnek teşkil edecek seviyede). | Eşdeğer seviyede doğrulama + PPO zayıflıklarını (domates/uç dükkanlar) tespit edip sentetik senaryo üretme disiplini. | Metodolojik titizliğimiz şampiyonla yarışacak düzeydeydi, ancak yanlış hipotez üzerinde işletildi. |
+| **Core Paradigm** | **Route-Replay / Metacounter:** Replaying a frozen 719-step action tape + minimal WEED repair + Day-6 shop-draw table across 64 pairs. | **Hybrid Neural-Search:** 10.23M Transformer (closed-loop BC + PPO) + rule-based repairs + Day 29 C++ local search handoff (Agent A) / Sequential action masks (Agent B). | Static replay was brittle against market and seed variations; the champion agent responded dynamically to live board and market states. |
+| **Learning & Optimization** | Naive BC collapsed in v0.0.8 ($2.9k) $\rightarrow$ **ML was completely deleted**. Only 23 macro parameters searched via CEM / Evolutionary search. | **BC $\leftrightarrow$ PPO $\leftrightarrow$ Heuristics Flywheel:** 11.9 Billion environment steps (8.3M self-play games) in JAX + custom Rust engine (`kagg-engine`). Net2Net depth growth (6 $\rightarrow$ 12 blocks). | We hit a dead end trying to mutate static tapes; the champion attained massive tactical depth through billions of RL steps. |
+| **Observation Representation** | v0.0.8 used an incomplete 4D vector (`[day, hour, money, hands]`). In route-replay, observation was only used for shop detection & weed repair. | **264 Tokens $\times$ 124 Features:** Farm tiles (200), units (40), market slots (10), commodities (12), global state, and opponent inventory tracker. 2D RoPE spatial encoding. | The champion learned spatial attention over a fully Markovian state; our model was blind to prices, inventories, and crop maturities. |
+| **Action Space & Coordination** | Raw action tapes from mined replays. Local mutation attempts broke delicate order/cash dependencies. | **Sequential Action Masking:** Units sampled sequentially (farmer first, then hands); each unit's choice dynamically masks tiles and seed inventories for subsequent units. Absolute SELL quantity head (1-100). | The champion eliminated multi-unit action collisions at the architectural level; we remained hostage to the tape's rigid schedule. |
+| **Market & Economy** | Exact execution of recorded cash schedules. Milk metering failed due to shed capacity (100) constraints. | Neural policy emits dynamic market orders; rule layer enforces pre-night liquidation of overflow above shed capacity (100) and endgame stock dumping. | The champion pro-actively managed shed capacity and dynamically aligned sales with live prices. |
+| **Endgame Execution** | Static DROP/SELL on steps 717-719. Replayed verbatim from tape. | **Agent A:** At dawn of Day 29 (final 24 hours), control transfers to a C++ Simulated Annealing search engine (~6s search). Joint optimization of harvest, transport, and liquidation. | Search was applied where it belongs: in the endgame where the time horizon collapses and the environment becomes largely deterministic. |
+| **Simulation Infrastructure** | Python `kaggle-environments` (~2.4s/game). 12 CPU workers running overnight sieves. | **High-Performance Rust Simulator (`native/engine`):** Zero-copy JAX GPU rollouts. **11,922,122,946 environment steps**. | **100,000× compute scale asymmetry.** Simulator throughput dictated the boundary of strategic exploration. |
+| **Validation Methodology** | Paired-seed CRN, CVaR₅, opponent panel win rates, LOO cross-validation, winner's curse tracking (Industry-grade rigor). | Equivalent statistical rigor + targeted generation of synthetic shop scenarios (tomato / extreme distributions) to fix policy blind spots. | Our experimental rigor was world-class, but was applied to optimize an over-constrained, brittle hypothesis. |
 
 ---
 
-## 2. Şampiyon Çözümün Anatomisi (1st Place: Deep Dive)
+## 2. Deep Dive: Anatomy of the 1st Place Solution
 
-Şampiyon ekibin çözümü, 4 uzmanın sinerjisiyle inşa edilmiştir:
-- `@morim3`: Nöral ağ mimarisi ve 10M model serisi (daha çok self-play hipotezi).
-- `@msdsm`: 20M model serisi ve Net2Net derinlik ölçekleme (daha çok parametre hipotezi).
-- `@BergBuch`: C++ Sezgisel arama motoru (heuristic search planner).
-- `@qistripute`: Kural tabanlı aksiyon yamaları ve replay analizi.
+The 1st place team divided labor across 4 specialized sub-systems:
+- `@morim3`: Neural architecture & 10M model line (scaling self-play games).
+- `@msdsm`: 20M model line & Net2Net depth growth (scaling parameter capacity).
+- `@BergBuch`: C++ heuristic planner & local search engine.
+- `@qistripute`: Rule-based action patches, shed overflow logic, and replay analytics.
 
-### 2.1. Ağ Mimarisi (10.23M Transformer & Token Şeması)
-Şampiyonun final ajanı **10,225,070 parametrelik**, 12 bloklu, 256 genişliğinde, 8 dikkat başlıklı ve 2D RoPE (Rotary Position Embedding) kullanan bir Transformer omurgasına sahiptir:
-- **Girdi Gözlemi (264 Token):**
-  - **200 Hücre Token'ı (Her iki oyuncu):** $10 \times 10$ ızgaradaki her kare için 34 öznitelik (bitki türü, büyüme aşaması, sulama/gübrelenme durumu, yabani ot).
-  - **40 Birim Token'ı (Her iki oyuncu):** 22 öznitelik (konum, taşınan envanter, rol).
-  - **10 Pazar Emri Slotu:** 10 öznitelik.
-  - **12 Emtia ve Hayvan Token'ı:** Fiyatlar, talep, doygunluk seviyeleri.
-  - **1 Küresel Durum Token'ı:** Gün, saat, nakit, işçi sayısı.
-  - **1 Rakip Envanter Bellek Token'ı:** Kamusal gözlemlerden (açık çiftlik, satın alımlar) kural tabanlı tahmin edilen gizli envanter olasılık dağılımı.
-- **Uzamsal Kodlama (2D RoPE):** Çiftlik kareleri arasındaki nispi geometrik mesafeler 16 boyutlu 2D döner konum kodlaması ile verilmiştir.
-- **Aksiyon Başlıkları:**
-  - Birim başına 500 aksiyon logiti.
-  - 10 Pazar slotu için ayrıştırılmış başlık: 1,003 standart işlem + **9 emtia $\times$ 100 miktar = mutlak SELL başlığı** (toplam 1,903 logit/slot).
+### 2.1. Transformer Architecture & Tokenization
+The final neural network has **10,225,070 parameters** (12 blocks, width 256, 8 attention heads, 256 $\rightarrow$ 1,024 $\rightarrow$ 256 GELU FFN):
+- **Structured Token Input (264 Tokens $\times$ 124 Features):**
+  - **200 Farm Cells (Both players):** 34 features per tile (crop type, maturity, hydration/fertilization counters, decay countdown, weeds, occupancy).
+  - **40 Units (Both players):** 22 features per unit (position, carried items, worker index, role).
+  - **10 Market Slots:** 10 features per slot.
+  - **12 Commodities & Animals:** Price trajectories, town consumption rate, market saturation.
+  - **1 Global State Token:** Season/day progress, money, hiring count, unlocked quadrants, active shops, remaining shed capacity (`shed_room`), pending overflow.
+  - **1 Opponent Inventory Memory Token:** Public observation belief tracker estimating the opponent's hidden carried inventory and shed distribution.
+- **2D RoPE (Rotary Position Embedding):** Encodes 2D geometric grid coordinates into attention heads, allowing attention to naturally perceive spatial distances.
+- **Action Heads:**
+  - 500 action logits per unit.
+  - 10 Market slots with an absolute SELL-quantity head: 1,003 non-SELL choices + 9 commodities $\times$ 100 discrete quantities = 1,903 decoded choices per slot.
 
-### 2.2. İteratif Hibrit Eğitim Döngüsü (The Iterative Flywheel)
-1.lik takımı tek bir eğitim yöntemi seçmek yerine birbirini besleyen bir döngü kurmuştur:
+### 2.2. The Iterative Training Flywheel
+Rather than choosing between RL, imitation learning, or search, the champion used an alternating training flywheel:
 
 ```mermaid
 flowchart TD
-    A["1. Kamusal Replay'ler (Public Replays)"] --> B["2. Davranış Klonlama (BC - JAX)"]
-    B --> C["3. Critic Warmup (Dondurulmuş Aktör)"]
-    C --> D["4. Self-Play PPO (Rust Motoru + GPU)"]
-    D --> E["5. Model Zaafiyetlerinin Tespiti\n(Domates / Uç Dükkan Dağılımları)"]
-    E --> F["6. C++ Arama Motoru ile Hedefli Sentetik Oyun Üretimi\n(300 Oyun / 600 Trajectory)"]
-    F --> G["7. Karışık Önbellek (Public + Sentetik Replay)"]
+    A["1. Public Replays (849 trajectories)"] --> B["2. Behavior Cloning (BC in JAX)"]
+    B --> C["3. Critic Warmup (Frozen Actor, GAE)"]
+    C --> D["4. Self-Play PPO (Rust Engine + GPUs)"]
+    D --> E["5. Policy Weakness Diagnosis\n(e.g., Tomato & Extreme Shop Skews)"]
+    E --> F["6. C++ Heuristic Planner Generates Targeted Replays\n(300 games / 600 trajectories)"]
+    F --> G["7. Mixed Cache (Public + Synthetic Replays)"]
     G --> B
 ```
 
-- **Ölçek:** Toplamda **8,290,767 PPO oyunu** ve **11,922,122,946 ortam adımı** (~11.9 Milyar adım).
-- **Critic Isıtma:** PPO öncesi aktör dondurularak sadece değer ağı (critic) GAE ($\gamma=1, \lambda=0.97$) ile eğitilmiş, aktörün başlangıçta bozulması engellenmiştir.
-- **Öğretmen Düzenlileştirmesi:** Katastrofik unutmayı önlemek için kayıp fonksiyonuna $0.2 \times \text{KL}(\pi_{\text{teacher}} \parallel \pi_{\text{policy}})$ eklenmiştir.
-- **Net2Net Derinlik Büyütme:** 6 blokluk küçük model eğitildikten sonra ağırlıklar fonksiyon-koruyucu (function-preserving) sıfır-ilkleme ile 12 bloğa genişletilmiştir.
+- **Massive Experience:** Over **8,290,767 PPO games** and **11.92 Billion environment steps**.
+- **Critic Warmup:** To prevent policy degradation when starting PPO after BC, the actor was frozen while the critic was fitted using GAE ($\gamma=1.0, \lambda=0.97$).
+- **Teacher Regularization:** Policy collapse was prevented by including a KL regularizer: $0.2 \times \text{KL}(\pi_{\text{teacher}} \parallel \pi_{\text{policy}})$.
+- **Net2Net Depth Growth:** Function-preserving weight expansion allowed initializing a 12-block model seamlessly from a converged 6-block model.
 
-### 2.3. Sıralı Aksiyon Maskeleme (Sequential Action Masking - Agent B)
-Ajanların aynı kareye gitmesi veya tohum miktarından fazla ekim emri verilmesi RL için büyük bir ceza kaynağıdır. Şampiyon bunu Agent B'de şu şekilde çözmüştür:
-1. Önce çiftçinin aksiyonu seçilir.
-2. Çiftçinin rezerve ettiği tohum ve hedef kare bir sonraki işçi için maskelenir.
-3. Sırayla tüm işçiler bu dinamik maske altında kararlarını verir.
-4. PPO log-olasılıkları da tam bu sıralı maskeleme yapısı altında optimize edilmiştir.
+### 2.3. Sequential Action Masking (Agent B)
+In multi-unit games, multi-agent coordination often suffers from units requesting the same resource or tile simultaneously. Agent B solved this inside JAX:
+1. The farmer chooses an action first.
+2. The chosen tile and seed reservations dynamically update masks for Hand 1.
+3. Units choose sequentially, each conditioned on the updated legal mask.
+4. Sampling and PPO log-probabilities were computed with these exact conditional masks.
 
-### 2.4. Oyun Sonu Arama Motoru Devri (Day 29 C++ Search Handoff - Agent A)
-Agent A, oyunun 29. günü şafağında (adım 696-720) kontrolü bir C++ yerel arama motoruna devreder:
-- 28. günde C++ kütüphanesi belleğe yüklenir.
-- 29. günün ilk anında ~6 saniyelik bir arama bütçesiyle (simulated annealing, yeniden başlatmalı yerel arama) son 24 saatin tüm hasat, taşıma, bırakma ve pazar satışlarını birlikte çözer.
-- Terminal nakit getirisini kuruşu kuruşuna maksimize eder.
-
----
-
-## 3. Bizim Çözümümüzün Anatomisi ve Evrimi (`ergousha`)
-
-Projemiz, baştan sona olağanüstü belgelenmiş ve ölçülmüş bir evrim geçirmiştir:
-
-### 3.1. Faz 1: İki Katmanlı Kural Tabanlı Ajan (v0.0.1 - v0.0.6)
-- **Makro Katman (`StrategicPlanner`):** Kare rollerini belirler, sermaye öncelik merdivenini yürütür (`engine_claim`).
-- **Mikro Katman (`SpatialScheduler`):** Görevleri belirler ve greedy atama yapar.
-- **Büyük Bulgu (Hungarian vs Greedy):** Jonker-Volgenant (Hungarian) eşleştirmesinin, greedy atamadan **%31 - %40 daha kötü** olduğu kanıtlandı. Çünkü greedy atama, boşta kalan işçileri ambar çevresinde bırakıyordu ve hayvan/yem lojistiği ambar çıkışlıydı!
-- **Makro Arama:** 23 boyutlu strateji vektörü CEM (Cross-Entropy Method) ve Evrimsel Arama ile optimize edildi.
-
-### 3.2. Faz 2: v0.0.8 Faciası ve ML'in Terk Edilmesi ($2.9k, 26× Kayıp)
-v0.0.8 sürümünde tüm kural motoru atılıp PyTorch ile eğitilen ilkel bir BC modeli devreye alındı. Ajan, ortamın en basit `starter` botuna karşı bile 4 maçta 0 çekerek ortalama **$2,910** aldı (önceki sürüm $75,668 alıyordu).
-
-Bu çöküşün gerçek sebepleri:
-1. **Aksiyon uzayında `FEED`, `CARE`, `PICKUP` token'ları yoktu!** Bilinmeyen tüm aksiyonlar `0 = PASS` sınıfına atanmıştı. Ajan hayvanları besleyemiyordu.
-2. **Durum uzayı Markovyen değildi:** Global vektör sadece `[day, hour, money, hands]` idi. Fiyatlar, ambar stoku, hayvan sayıları ve pazar durumu modele verilmemişti.
-3. **Etiket çarpışması:** Birim aksiyonları $10 \times 10$ ızgarada pozisyona göre yazılmıştı. Aynı karedeki işçiler birbirinin etiketini eziyordu ve ızgaranın %84'ü `PASS` olduğu için model "her yerde PASS" demeyi öğrendi.
-4. **Hatalı RL kurgusu:** Argmax çıkarımları bölüm ödülüyle ağırlıklandırılmıştı; değer ağı (critic) yoktu, GAE yoktu, 720 adımlık kredi ataması yoktu.
-
-> **Kritik Kırılma Noktası:**
-> Bu ağır hezimet sonrasında depoda şu genelleme yapıldı:
-> *"56 bin doların üstü strateji değil; her basamak sabit bir plan ve ince bir onarım katmanından ibarettir... Öğrenme kapalı formu olmayan yere aittir. Mikro tam eşleştirmedir, makro 23 sayıdır. Atomik aksiyonları klonlamak gürültülü bir yaklaştırıcı koymaktır."*
->
-> Tüm PyTorch/RL kodu silindi (`rm -rf rl/`) ve proje tamamen **Route Replay** çizgisine yöneldi.
-
-### 3.3. Faz 3: Rota Tekrarı (Route Replay) ve Metacounter (v0.2.0 - v0.5.1)
-- Liderlik tablosundan indirilen yüksek skorlu 719 adımlık bir aksiyon kaseti harfiyen replaying yapıldı.
-- Referans merdivende skor bir anda 36'dan **60/60**'a çıktı.
-- Ancak canlı maçlarda kasetin **stokastik pazar şoklarına karşı tamamen kırılgan** olduğu anlaşıldı. Aynı kaset şanslı tohumda $156k alırken, ters tohumda $73k alıyordu.
-- Bu kırılganlığı aşmak için devasa bir madencilik ve eleme hattı kuruldu: 4,300+ aday incelendi, rakip paneline karşı CVaR ve kazanma oranı ile en sağlam kaset seçildi.
-- Daha sonra **Metacounter** mimarisine geçildi (v0.4.0): 6. gündeki dükkan ikilisine göre (64 farklı olasılık) kaset değiştiren bir dükkan yönlendiricisi (`day-6 draw router`) eklendi.
-
-### 3.4. Faz 4: Rota Sentezi ve Mikro Mutasyon Çıkmazı (Issue #26 - #30)
-Dondurulmuş rotayı yerel olarak iyileştirmek için aksiyon uzayında mutasyon operatörleri denendi:
-- **Issue #29 (Manhattan Yol Kısaltma):** Yürüme adımlarının %98.3'ünün zaten optimal olduğu, tasarruf edilen adımların sulama kotası yüzünden üretime dönüştürülemediği görüldü (Nötr sonuç).
-- **Issue #30 (Süt Satışı Öteleme / Cash Metering):** Süt taban fiyatın %13'üne satılıyordu. Sütü depolayıp fiyat toparlanınca satma denendi. Ancak ambar sınırı (100) kilitlendi; süt depolamak değerli yün ve çileklerin ambardan taşarak yok olmasına yol açtı. Dahası, 927 emirden sadece 5 satış-alış çiftini birkaç adım ötelemek bile kazanma oranını %7.2 düşürdü. Rota, en ufak oynamada çöken aşırı hassas bir nakit takvimiydi.
-
-### 3.5. Faz 5: 64 Çekiliş Tablosunun Refit Denemesi ve Kazananın Laneti
-v0.5.2 aşamasında 64'lük dükkan tablosunu gerçek rakiplere karşı optimize etme deneyi yapıldı.
-- Örneklem içi kazanç: **+$5,650 / çekiliş**.
-- Leave-One-Out (LOO) çapraz doğrulamada sonuç: **-$151 / çekiliş**'e çöktü!
-- 19 hücrenin 15'i katlar arasında kaset değiştirdi (saf gürültü).
-- Tavan skora ulaşılmış, veri seti hacmi ve açık döngülü kaset paradigması sınırlarına dayanmıştı.
+### 2.4. Endgame C++ Search Handoff (Agent A)
+Agent A relies on the neural policy for Days 0–28. At dawn of Day 29 (the final 24 hours):
+- The C++ library (`terminal_search.so`) is pre-loaded on Day 28.
+- On Day 29 dawn, if overage time is sufficient (>10s), the controller switches to a C++ Simulated Annealing search engine.
+- For ~6 seconds, the planner jointly optimizes all task assignments, pathing, harvesting, ferrying, and liquidation to maximize terminal cash down to the cent.
+- If overage is low or loading fails, it safely falls back to the neural policy.
 
 ---
 
-## 4. Karşılaştırmalı Analiz: Neyi Doğru, Neyi Yanlış ve Neyi Eksik Yaptık?
+## 3. Retrospective: What We Did Right, What We Did Wrong, and What We Missed
 
-```mermaid
-graph TB
-    subgraph "Bizim Çözümümüz (ergousha)"
-        A1["Veri Madenciliği & Pazar Teşhisi\n(Yumurta tuzağı, gübre çarpanı)"] -->|Çok Doğru| S1["Güçlü Temel"]
-        A2["v0.0.8 BC Çöküşü\n($2.9k, 26x kayıp)"] -->|Yanlış Teşhis| F1["ML Tamamen Silindi\n'Yukarıda strateji yok' miti"]
-        F1 --> A3["Açık Döngülü Rota Tekrarı\n(719 adımlık dondurulmuş kaset)"]
-        A3 -->|Kırılganlık| F2["Aşırı Hassas Nakit Çizelgesi\n(5 emir kaysa sistem çöküyor)"]
-        F2 --> A4["Metacounter / 64 Çekiliş Tablosu\n(Python Simülatörü: ~2.4s)"]
-    end
+### 3.1. What We Did Right (Strengths)
 
-    subgraph "1.lik Çözümü (msdsm)"
-        B1["Hızlı Rust Simülatörü\n(kagg-engine)"] -->|11.9 Milyar Adım| S2["Devasa Ölçek"]
-        B2["264 Token Transformer\n+ 2D RoPE + Sıralı Maskeleme"] --> S3["Markovyen Temsil"]
-        S2 & S3 --> B3["İteratif Flywheel\n(BC ↔ PPO ↔ Sentetik Sezgisel)"]
-        B3 --> B4["Kapalı Döngü Karar\n+ Kural Onarımları\n+ 29. Gün C++ Arama Devri"]
-    end
-```
+1. **Flawless Empirical & Statistical Discipline:**
+   - **Common Random Numbers (CRN):** All A/B evaluations and CEM parameter searches used strictly paired seeds across both seat positions.
+   - **P(win) & Margin CVaR₅ Formulation:** Recognized that cash was 86% common-mode variance caused by shared shop draws. Pivoted selection from own-cash to head-to-head win rate and margin CVaR₅ against an opponent panel.
+   - **Winner's Curse Awareness:** Faithfully measured and reported shrinkage between selection seeds and held-out seeds.
+2. **Deep Economic & Game Mechanics Analysis:**
+   - Mined daily Kaggle dumps to prove that EGG was an economic trap (0.6% revenue share in the top decile), despite flat price curves.
+   - Mathematically proved that applying fertilizer to strawberries yielded 2× production, vastly outperforming selling raw fertilizer.
+   - Discovered that `obs.private.shed` reflects the state *prior* to unit actions, preventing catastrophic inventory truncation bugs.
+3. **Software Engineering Standards:**
+   - Pre-commit hooks (`sync_opponent.py`) automatically versioned every submission into `opponents/vX_Y_Z.py` as sparring partners.
+   - Strict pre-flight checks eliminated environment quirks (such as Kaggle evaluating the *last callable* in the file). Zero crashes and zero timeouts across all official submissions.
 
-### 4.1. Neleri Çok Doğru Yaptık? (Strengths)
+### 3.2. What We Did Wrong (Critical Pitfalls)
 
-1. **Benzersiz Deneysel Disiplin ve İstatistiksel Olgunluk:**
-   - **Ortak Rassal Sayılar (Common Random Numbers - CRN):** A/B testlerinde ve aramalarda rakipleri aynı tohumlarda eşleştirerek tohum şansını izole ettik.
-   - **Metrik Evrimi:** Pazarın %86 ortak varyans olduğunu fark edip, yanıltıcı nakit ortalamasını terk ederek ikili kazanma oranına ve marj CVaR₅'e geçtik.
-   - **Kazananın Laneti (Winner's Curse) Farkındalığı:** Seçilen adayların test tohumlarında ne kadar gerilediğini sürekli raporladık.
-2. **Pazar Dinamiklerinin Matematiksel Olarak Çözülmesi:**
-   - Yumurtanın stratejik olarak ayrışabilir (separable) ama ekonomik olarak bir aldatmaca (%0.6 pay) olduğunu kanıtladık.
-   - Gübrelemenin satılmak yerine çileğe verilmesinin çarpan etkisini modelledik.
-   - Pazarın tükenen bir havuz değil, kasaba talebiyle kendini yenileyen bir mekanizma olduğunu ortaya çıkardık.
-   - `obs.private.shed`'in birim aksiyonlarından önce güncellendiğini (`observation ordering`) yakalayarak felaket bir envanter kesilmesini önledik.
-3. **Mühendislik Standartları ve Güvenilirlik:**
-   - Otomatik rakip arşivleme (`sync_opponent.py`) ile her sürüm sparring partner olarak saklandı.
-   - `pre-flight` kontrolleri ile ortamın "son çağrılabilir fonksiyonu ajan kabul etme" tuzağı dahil tüm hatalar engellendi. Sıfır crash, sıfır timeout ile yarışıldı.
+1. **The Fatal Misdiagnosis of v0.0.8 (Premature Abandonment of ML):**
+   - In v0.0.8, a naive Behavior Cloning model collapsed against the environment's starter bot ($2,910 vs $75,668).
+   - This failure was entirely due to basic bugs and architectural flaws:
+     - The action space lacked `FEED`, `CARE`, and `PICKUP` tokens (mapped to `PASS`).
+     - State was non-Markovian: 4 scalar numbers (`[day, hour, money, hands]`), completely omitting market prices, inventories, crop stages, and animal counts.
+     - Spatial label collisions on a $10 \times 10$ grid caused 84% `PASS` bias.
+     - Unsound RL loop: argmax rollouts weighted by episode return without a critic or GAE.
+   - **The Mistake:** Instead of diagnosing these implementation flaws, the project concluded:
+     > *"Above ~$56k this is not a strategy competition — every ladder rung above 5, and the current #1, is a fixed plan with a thin repair layer... learning has no place here."*
+   - All ML code was deleted (`rm -rf rl/`), locking the project into the open-loop replay paradigm, while the winner proved that Transformer + PPO was the ultimate winning strategy.
+2. **Getting Trapped in the Open-Loop Route-Replay Paradigm:**
+   - Replaying a static 719-step action tape increased the reference ladder score from 36 to 60/60, creating a false illusion of mastery.
+   - However, an open-loop tape is inherently blind to environment stochasticity. Shops spawn randomly every 3 days; an 8-12 day crop cycle tied to a static tape is completely exposed to adverse market draws.
+3. **Searching Over a Brittle Cash Schedule (Issues #26–#30):**
+   - Weeks were spent attempting to mutate the recorded tape (Manhattan path shortening, milk sales metering).
+   - But a mined tape is a tightly coupled, over-tuned cash schedule: 319 of 458 funded orders cannot be delayed by a single step. Shifting just 5 market orders out of 927 degraded panel win rate by 7.2%.
+4. **The False Latency Dichotomy:**
+   - We reasoned: *"Decision latency is 8-12 days, shop respawn is 3 days, therefore closed-loop adaptation is impossible and open-loop is the equilibrium."*
+   - This was a false dilemma. A closed-loop policy does not need to abandon a crop mid-growth; it dynamically manages portfolio risk, shifts harvesting and selling priorities based on spot prices, manages shed headroom, and absorbs weed/worker perturbations.
 
-### 4.2. Neleri Yanlış Yaptık? (Critical Pitfalls)
+### 3.3. What We Missed (Gaps & Scale Asymmetry)
 
-1. **En Kritik Stratejik Hata: v0.0.8'deki Uygulama Kusurunu Paradigmanın Kusuru Zannetmek:**
-   - v0.0.8'deki modelin çöküşü makine öğreniminin yetersizliğinden değil; **eksik aksiyonlar (`FEED`/`CARE` yok), eksik durum (fiyatsız gözlem), etiket çarpışması ve criticsiz avantaj ağırlıklandırması** gibi ilkel uygulama hatalarından kaynaklanıyordu.
-   - Ancak bu teknik hata analiz edilip düzeltilmek yerine felsefi bir yargıya dönüştürüldü: *"Bu oyunda öğrenmeye yer yoktur, yukarısı sadece kaset tekrarıdır."*
-   - Bu yanlış teşhis, bizi yarışmayı kazandıracak olan tek yoldan (RL ve Transformer) tamamen kopardı.
-2. **Açık Döngü (Open-Loop) Rota Tekrarının Çıkmazına Saplanmak:**
-   - Başka oyuncuların başarılı bir maçını kaset gibi baştan sona oynatmak, referans merdiveni geçse de doğası gereği kırılgandır.
-   - Simülasyon her 3 günde bir rastgele dükkan açarken, 8-12 gün süren ürün yatırımlarını statik bir kasete bağlamak ajanı pazar şoklarına karşı kör bıraktı.
-   - Metacounter ile 64 dükkan çekilişine 41 kaset atamak bu açık döngü problemini hafifletti ama çözemedi.
-3. **Kırılgan Bir Nakit Çizelgesinde Lokal Arama Yapmaya Çalışmak:**
-   - Issue #26-#30 boyunca dondurulmuş kasetin üzerinde mutasyonlar arandı. Ancak bir kaset, adım adım birbirine bağlı 458 emir ve binlerce hareketten oluşan rijit bir bütündür.
-   - Sütü bekletmek ambarı tıkadı; 5 alım-satım emrini kaydırmak işçilerin tohumsuz kalmasına yol açtı. Değişkenlerin birbiriyle bu denli kenetlendiği açık döngülü bir yapıda yerel arama (local search) matematiksel olarak imkansızdı.
-4. **"Gecikme (Latency) Yüzünden Uyarlama İmkansızdır" Yanılgısı:**
-   - "Karar gecikmesi 8-12 gün, dükkan açılışı 3 gün, o halde kapalı döngü uyarlama yapılamaz, açık döngü tek dengedir" çıkarımı yapıldı.
-   - Oysa kapalı döngü nöral politika anlık olarak ürün değiştirmek zorunda değildir; risk dengesini kurar, anlık fiyatlara göre hasat/satış önceliğini ayarlar, ambar kapasitesini yönetir ve yabani ot/işçi sapmalarını dinamik olarak telafi eder. Şampiyonun politikası tam olarak bunu başardı.
-
-### 4.3. Neler Eksikti? (Gaps & Missed Opportunities)
-
-1. **Hesaplama Motoru Asimetrisi (Python vs. Rust):**
-   - Biz Python `kaggle-environments` ile oyun başına ~2.4 saniye harcarken; şampiyon ekip Rust ile yazılmış `kagg-engine` sayesinde saniyede binlerce adımı GPU'da simüle etti.
-   - Şampiyon **11.9 Milyar adım** görürken, bizim simülasyon hacmimiz birkaç yüz bin adımda kaldı. Bu ~100.000 katlık deneyim farkı, taktiksel üstünlüğün anahtarı oldu.
-2. **Çok Varlıklı (Multi-Entity) Transformer ve Uzamsal Temsil:**
-   - Şampiyon çiftliği, birimleri ve pazarı 264 token'lık bir Transformer ile modeledi.
-   - 2D RoPE ile uzamsal geometri doğal olarak öğrenildi. İşçilerin nerede durduğu, nereye gideceği nöral ağın dikkat katmanlarında çözüldü.
-3. **Sıralı Aksiyon Maskeleme (Sequential Action Masking):**
-   - Çok birimli (multi-agent) oyunlarda en büyük kriz olan "aynı tohumu/kareyi birden fazla birimin istemesi" sorununu, şampiyon işçileri sırayla seçip maskeleri anlık güncelleyerek mimaride çözdü.
-4. **Aramanın Yalnızca Oyun Sonuna Odaklanması (Endgame Search Handoff):**
-   - Tüm oyunu arama ile çözmek kombinatoryal patlama yüzünden imkansızdır.
-   - Ancak ufkun 24 saate (24 adım) indiği 29. gün şafağında arama yapmak deterministiktir ve mükemmel çalışır. Şampiyonun Agent A'da yaptığı C++ devir teslimi tam olarak buydu.
+1. **Compute Engine Asymmetry (Python vs. Rust):**
+   - We simulated in standard Python `kaggle-environments` (~2.4s per game). A 12-worker CPU overnight run processed at most a few tens of thousands of games.
+   - The 1st place team built `kagg-engine` in Rust with zero-copy JAX bindings, simulating **11.92 Billion steps** (~100,000× more experience). Simulation speed set the horizon of strategic possibility.
+2. **Multi-Entity Transformer with 2D RoPE:**
+   - The winner represented the full spatial environment via 264 tokens, enabling self-attention across cells, units, and market slots.
+3. **Sequential Action Masking:**
+   - Solved multi-unit spatial and resource conflicts cleanly inside the policy forward pass rather than relying on brittle greedy heuristics or Hungarian matching.
+4. **Endgame-Only Local Search:**
+   - Rather than attempting to optimize an intractable 720-step schedule, the winner restricted search to the deterministic 24-step endgame (Day 29), extracting maximum value when it mattered most.
 
 ---
 
-## 5. Gelecek Yarışmalar İçin Çıkarılan Temel İlkeler (Actionable Takeaways)
+## 4. Five Actionable Principles for Future Competitions
 
-Bu yarışmadan çıkarılan dersler, gelecekteki tüm karmaşık simülasyon ve RL yarışmaları için evrensel bir rehber niteliğindedir:
-
-### İlke 1: Erken Başarısızlıklarda Yöntemi Değil, Uygulamayı Sorgula (Diagnose Bug vs Paradigm)
-Bir makine öğrenimi veya RL denemesi ortamın en basit botuna karşı bile kaybediyorsa (%99 ihtimalle) problem o paradigmanın teorisinde değil; durum uzayının eksikliğinde (Markovyen olmaması), aksiyon sözlüğündeki bir bug'da veya kayıp fonksiyonundaki bir bozukluktadır. "Burada ML çalışmıyor" sonucuna varmadan önce durum, aksiyon ve gradyan akışı mikroskop altına alınmalıdır.
-
-### İlke 2: Simülasyon Hızı Stratejiyi Belirler (Fast Simulator First)
-Eğer bir ortamda RL veya yoğun arama yapılacaksa, Python simülatörüyle yola çıkmak baştan kaybetmektir. İlk 1-2 haftada Rust/C++ ile hafif ve hızlı bir simülasyon motoru yazmak; eğitim hacmini $10^5$ kat artırır. 11.9 Milyar adım gören bir ajan, 100 bin adım gören herhangi bir kural sistemini ezer.
-
-### İlke 3: Açık Döngülü Rota Ezberi (Route Replay) Bir Yerel Optimum Tuzağıdır
-Başka ajanların hareket kasetlerini harfiyen replaying yapmak hızlı bir liderlik tablosu sıçraması sağlar; ancak bu bir seraptır. Açık döngülü sistemler stokastik ortamlarda kırılgandır, pazar şoklarını ememez ve üzerlerinde yerel arama/mutasyon yapılamayacak kadar hassastır.
-
-### İlke 4: Hibrit Sistemler Saf Sistemleri Döver (The Iterative Flywheel)
-Ne "saf uçtan uca RL" ne de "saf el yazısı kurallar". Kazanan mimari:
-- **BC:** Kamusal veriden hızlı temel taktik edinimi.
-- **PPO:** Kendi kendine oynayarak (self-play) pazar temposunu ve mikro refleksleri geliştirme.
-- **Sezgisel Motor:** Zayıf kalınan senaryoları (örneğin domates ağırlıklı dükkanlar) tespit edip bu durumlara özel sentetik veri üretme.
-- **Kural Yamaları:** Ambar taşmasını ve kaynak çakışmasını mimari ve kural düzeyinde budama.
-
-### İlke 5: Aramayı Zaman Ufkunun Kapandığı Yere Sakla (Search in the Endgame)
-Oyunun başında ve ortasında arama yapmak pazarın stokastikliği yüzünden gürültü üretir. Ancak oyun sonuna yaklaşıldığında (örneğin son %5'lik dilim), belirsizlik sıfırlanır, hedef tekilleşir (tüm varlıkları nakde çevir). Bu noktada nöral politikadan C++ arama motoruna geçmek terminal skoru maksimize eder.
+1. **Principle 1 (Diagnose the Bug, Not the Paradigm):**
+   If an ML/RL baseline fails against a trivial starter bot, the failure is almost certainly an implementation bug (missing action tokens, non-Markovian state, broken loss function), not a proof that ML is unviable. Never abandon a paradigm without a rigorous audit of state, action, and gradient flow.
+2. **Principle 2 (Fast Simulator First):**
+   In simulation and RL competitions, invest the first 1-2 weeks in building a high-speed simulation engine in Rust, C++, or JAX. An agent trained on 11 billion steps will overwhelmingly defeat hand-crafted rules trained on 100 thousand steps.
+3. **Principle 3 (Open-Loop Replay is a Local Optimum):**
+   Replaying elite action traces provides an easy early boost on static benchmarks, but creates a fragile agent incapable of handling stochastic shocks or adversarial counter-play.
+4. **Principle 4 (The Hybrid Flywheel Wins):**
+   Do not treat RL, imitation learning, heuristics, and search as mutually exclusive. The winning strategy is an iterative flywheel:
+   `BC (bootstrap) ➔ PPO (self-play expansion) ➔ Heuristic synthetic generation (patching blind spots) ➔ BC refinement ➔ Rule-based runtime guards`.
+5. **Principle 5 (Reserve Search for Collapsed Horizons):**
+   Combinatorial search over long stochastic horizons is noisy and intractable. Restrict local search to the endgame (the final 5-10% of steps) where uncertainty collapses and terminal value can be greedily extracted.
